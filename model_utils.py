@@ -39,13 +39,15 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None):
     if symmetry is not None:
         U1_symm = symmetry.U1_symm
     for i in range(n):
-        log_amp, = model.forward(samples, compute_phase=False)  # (seq, batch, phys_dim)
+        (log_amp,) = model.forward(
+            samples, compute_phase=False
+        )  # (seq, batch, phys_dim)
         amp = log_amp[-1].exp()  # (batch, phys_dim)
         if U1_symm:
             n_down = samples.sum(dim=0)  # (batch, )
             n_up = samples.shape[0] - n_down
-            up_mask = n_up >= n/2
-            down_mask = n_down >= n/2
+            up_mask = n_up >= n / 2
+            down_mask = n_down >= n / 2
             amp[up_mask, 0] = 0
             amp[down_mask, 1] = 0
         if len(sample_count) < max_unique:
@@ -56,8 +58,13 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None):
             mask = sample_count > 0
 
             batch = samples.shape[1]
-            samples = torch.cat([torch.cat([samples, torch.zeros(1, batch)], dim=0),
-                               torch.cat([samples, torch.ones(1, batch)], dim=0)], dim=1)
+            samples = torch.cat(
+                [
+                    torch.cat([samples, torch.zeros(1, batch)], dim=0),
+                    torch.cat([samples, torch.ones(1, batch)], dim=0),
+                ],
+                dim=1,
+            )
             samples = samples.T[mask].T  # (seq, batch), with updated batch
             sample_count = sample_count[mask]  # (batch, )
         else:
@@ -101,13 +108,15 @@ def sample_without_weight(model, batch=1000, symmetry=None):
     if symmetry is not None:
         U1_symm = symmetry.U1_symm
     for i in range(n):
-        log_amp, = model.forward(samples, compute_phase=False)  # (seq, batch, phys_dim)
+        (log_amp,) = model.forward(
+            samples, compute_phase=False
+        )  # (seq, batch, phys_dim)
         amp = log_amp[-1].exp()  # (batch, phys_dim)
         if U1_symm:
             n_down = samples.sum(dim=0)  # (batch, )
             n_up = samples.shape[0] - n_down
-            up_mask = n_up >= n/2
-            down_mask = n_down >= n/2
+            up_mask = n_up >= n / 2
+            down_mask = n_down >= n / 2
             amp[up_mask, 0] = 0
             amp[down_mask, 1] = 0
 
@@ -158,7 +167,9 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
     batch_idx = torch.arange(batch).reshape(1, batch)
     spin_idx = samples.to(torch.int64)
 
-    log_amp, log_phase = model.forward(samples, compute_phase=True)  # (seq, batch, phys_dim)
+    log_amp, log_phase = model.forward(
+        samples, compute_phase=True
+    )  # (seq, batch, phys_dim)
     log_amp = log_amp[:-1]  # (n, batch, phys_dim)
     log_phase = log_phase[:-1]  # (n, batch, phys_dim)
 
@@ -176,7 +187,7 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
         # .angle() produces nan in certain cases, use .atan2() as a temporary workaround
         # log_phase = (phase[phase_idx] * ((log_amp + 1j * log_phase) / 2).exp().mean(dim=0)).angle() * 2  # (batch0, )
         # log_phase = (phase[phase_idx] * ((log_amp + 1j * log_phase) / 2).exp().mean(dim=0))
-        log_phase = (((log_amp + 1j * log_phase) / 2).exp().mean(dim=0))
+        log_phase = ((log_amp + 1j * log_phase) / 2).exp().mean(dim=0)
         log_phase = log_phase.imag.atan2(log_phase.real) * 2  # (batch0, )
         log_amp = log_amp.exp().mean(dim=0).log()  # (batch0, )
     return log_amp, log_phase
@@ -224,7 +235,9 @@ def compute_grad(model, samples, sample_weight, Eloc, symmetry=None):
 
 
 @torch.no_grad()
-def compute_observable(model, samples, sample_weight, observable, batch_mean=True, symmetry=None):
+def compute_observable(
+    model, samples, sample_weight, observable, batch_mean=True, symmetry=None
+):
     """
 
 
@@ -256,7 +269,9 @@ def compute_observable(model, samples, sample_weight, observable, batch_mean=Tru
     pauli_strs, coefs, spin_idx = observable
     n_type = len(pauli_strs)
     # ord('X')=88, maps 'X' to 0, 'Y' to 1, 'Z' to 2
-    pauli_num = torch.tensor([[ord(c) - 88 for c in str_i] for str_i in pauli_strs])  # (n_type, n_site)
+    pauli_num = torch.tensor(
+        [[ord(c) - 88 for c in str_i] for str_i in pauli_strs]
+    )  # (n_type, n_site)
     X_sites = pauli_num == 0
     Y_sites = pauli_num == 1
     Z_sites = pauli_num == 2
@@ -265,8 +280,12 @@ def compute_observable(model, samples, sample_weight, observable, batch_mean=Tru
 
     # group up the computations that can be done at the same time
     # example: XX and YY share flip, while YY and ZZ share phase up to a constant
-    flip_sites, inv_flip_idx = torch.unique(flip_sites, dim=0, return_inverse=True)  # (n_unique, n_site)
-    phase_sites, inv_phase_idx = torch.unique(phase_sites, dim=0, return_inverse=True)  # (n_unique, n_site)
+    flip_sites, inv_flip_idx = torch.unique(
+        flip_sites, dim=0, return_inverse=True
+    )  # (n_unique, n_site)
+    phase_sites, inv_phase_idx = torch.unique(
+        phase_sites, dim=0, return_inverse=True
+    )  # (n_unique, n_site)
     flip_results = []
     phase_results = []
 
@@ -284,7 +303,9 @@ def compute_observable(model, samples, sample_weight, observable, batch_mean=Tru
     for flip_sites_i in flip_sites:
         if flip_sites_i.any():
             flip_idx = spin_idx.T[flip_sites_i].T  # (n_op, n_flip)
-            psixp_over_psix = compute_flip(model, samples, flip_idx, symmetry, log_amp, log_phase)  # (n_op, batch)
+            psixp_over_psix = compute_flip(
+                model, samples, flip_idx, symmetry, log_amp, log_phase
+            )  # (n_op, batch)
             flip_results.append(psixp_over_psix)
         else:
             flip_results.append(torch.ones(1))
@@ -304,7 +325,9 @@ def compute_observable(model, samples, sample_weight, observable, batch_mean=Tru
             coef = torch.tensor(coef)
         if len(coef.shape) < 2:
             coef = coef.reshape(-1, 1)
-        result_i = Y_phase[i] * phase_results[inv_phase_idx[i]] * flip_results[inv_flip_idx[i]]  # (n_op, batch)
+        result_i = (
+            Y_phase[i] * phase_results[inv_phase_idx[i]] * flip_results[inv_flip_idx[i]]
+        )  # (n_op, batch)
         result_i = coef * result_i  # (n_op, batch)
         results.append(result_i)
 
@@ -341,14 +364,17 @@ def compute_flip(model, samples, flip_idx, symmetry, log_amp, log_phase):
     n, batch = samples.shape
     n_op, n_flip = flip_idx.shape
 
-    samples_flipped = samples.expand(n_op, -1, -1).transpose(0, 1).clone()  # (n, n_op, batch)
+    samples_flipped = (
+        samples.expand(n_op, -1, -1).transpose(0, 1).clone()
+    )  # (n, n_op, batch)
     flip_mask = torch.zeros_like(samples_flipped, dtype=torch.bool)
     #         (n_op, n_flip)        (n_op, 1)  indices selected: (n_op, n_flip, batch)
     flip_mask[flip_idx, torch.arange(n_op).unsqueeze(1), :] = 1
     samples_flipped[flip_mask] = 1 - samples_flipped[flip_mask]
 
-    log_amp_1, log_phase_1 = compute_psi(model, samples_flipped.reshape(n, n_op * batch),
-                                         symmetry, check_duplicate=True)  # (n_op*batch)
+    log_amp_1, log_phase_1 = compute_psi(
+        model, samples_flipped.reshape(n, n_op * batch), symmetry, check_duplicate=True
+    )  # (n_op*batch)
     log_amp_1 = log_amp_1.reshape(n_op, batch)
     log_phase_1 = log_phase_1.reshape(n_op, batch)
 
@@ -388,6 +414,7 @@ def compute_phase(spin_pm, phase_idx):
         O_loc(x) = O_{x, x'} psi(x') / psi(x)
     """
     n, batch = spin_pm.shape
-    spin_pm_relevant = spin_pm[phase_idx.unsqueeze(-1), torch.arange(batch)]  # (n_op, n_phase, batch), +-1
+    spin_pm_relevant = spin_pm[
+        phase_idx.unsqueeze(-1), torch.arange(batch)
+    ]  # (n_op, n_phase, batch), +-1
     return spin_pm_relevant.prod(dim=1)  # (n_op, batch)
-
