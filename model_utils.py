@@ -32,16 +32,38 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None):
     """
     batch0 = batch
     assert model.phys_dim == 2, "Only spin 1/2 systems are supported"
+
+    # Find the number of spins in the system. This is the length
+    # of the s-section of the input configuration vector \vec s
     n = model.system_size.prod()
-    samples = torch.zeros(0, 1)
-    sample_count = torch.tensor([batch], dtype=torch.int64)
+
+    # Initialize the samples tensor, meant to hold
+    # system configurations sampled using the model
+    samples = torch.zeros(0, 1)  # []
+    sample_count = torch.tensor([batch], dtype=torch.int64)  # [batch_size]
     U1_symm = False
     if symmetry is not None:
         U1_symm = symmetry.U1_symm
     for i in range(n):
-        (log_amp,) = model.forward(
+        # Every time a new addition is made, update the probabilities used to sample
+        # new spins.
+        #
+        # Case 1: we're still generating new spins. In this situation, this
+        # changes the probabilities used in the binomial distribution for selecting a
+        # new spin addition to a particular sequence (sample), for each batch. Note that
+        # in this case, we ignore the particulars of the Binomial distribution and just
+        # focus on whether an up or down spin is even a possible addition to the chain.
+        # In this way, prioritize "seeding" with a unique set of configuration stubs.
+        #
+        # Case 2: we've generated all the unique samples we need.
+        (log_amp,) = model.forward(  # No phases required for Ising model
             samples, compute_phase=False
         )  # (seq, batch, phys_dim)
+
+        # Model generates logarithmic amplitudes, so exponentiate to obtain the
+        # true amplitudes. Grab only the parts of the output corresponding to
+        # P(s_1 | J) through P(s_i) | s_1, ..., s_{i-1}, J), done by the [-1] index--
+        # which retrieves the last slice along the first dimension.
         amp = log_amp[-1].exp()  # (batch, phys_dim)
         if U1_symm:
             n_down = samples.sum(dim=0)  # (batch, )
@@ -50,11 +72,37 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None):
             down_mask = n_down >= n / 2
             amp[up_mask, 0] = 0
             amp[down_mask, 1] = 0
+
+        # amp is a tensor of shape (batch, phys_dim). It contains conditional probabilities
+        # for the same degree of freedom--i.e., all P(s_i | s_1, ..., s_{i-1}, J) for a given i
+        # and all samples in the batch.
+
+        # Of course, for spin-1/2 systems, we only need either dimension along phys_dim.
+
+        # Generate new unique sample branches if the number of
+        # unique samples is less than the maximum allowed
         if len(sample_count) < max_unique:
+
+            # NOTE: the model outputs probabilities, not amplitudes. The amp variable
+            # should probabily be called something like probs.
+
+            # This is where we take only the first dimension and use a Binomial distribution,
+            # limiting support to spin-1/2 systems.
+
+            # e.g., probs = [0.4, 0.7, 0.3, ...]
+
+            # The maximum number of spin-down particles should be the total number of spins.
             distribution = Binomial(total_count=sample_count, probs=amp[:, 0])
+
+            # For each of these, we sample numbers of down-spins
+            # e.g., zero_count = [2, 3, 1, ...], where each element is no greater than the
             zero_count = distribution.sample()  # (batch, )
             one_count = sample_count - zero_count
+
+            # This produces another sample count tensor.
             sample_count = torch.cat([zero_count, one_count], dim=0)
+
+            # Ensure no counts are negative (TODO: or zero?)
             mask = sample_count > 0
 
             batch = samples.shape[1]
@@ -64,11 +112,18 @@ def sample(model, batch=10000, max_unique=1000, symmetry=None):
                     torch.cat([samples, torch.ones(1, batch)], dim=0),
                 ],
                 dim=1,
-            )
+            )  # (seq, batch)
             samples = samples.T[mask].T  # (seq, batch), with updated batch
             sample_count = sample_count[mask]  # (batch, )
+
+            # NOTE: how does this guarantee UNIQUE samples? Make an argument using the
+            # Principle of Mathematical Induction.
         else:
             # do not generate new branches
+
+            # Treat the model output as as tensor of multinomial distributions
+            # (NOTE: assuption: where the "distribution dimension" is the last dimension)
+            # and sample from them to generate new sampled spins.
             sampled_spins = torch.multinomial(amp, 1)  # (batch, 1)
             samples = torch.cat([samples, sampled_spins.T], dim=0)
     if symmetry is not None:
@@ -162,6 +217,9 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
 
     if check_duplicate:
         samples, inv_idx = torch.unique(samples, dim=1, return_inverse=True)
+
+    # n: sequence length
+    # batch: number of samples
     n, batch = samples.shape
     n_idx = torch.arange(n).reshape(n, 1)
     batch_idx = torch.arange(batch).reshape(1, batch)
@@ -173,6 +231,7 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
     log_amp = log_amp[:-1]  # (n, batch, phys_dim)
     log_phase = log_phase[:-1]  # (n, batch, phys_dim)
 
+    # LOGS of these values; summing then exponentiating is equivalent to taking the product
     log_amp = log_amp[n_idx, batch_idx, spin_idx].sum(dim=0)  # (batch, )
     log_phase = log_phase[n_idx, batch_idx, spin_idx].sum(dim=0)  # (batch, )
 

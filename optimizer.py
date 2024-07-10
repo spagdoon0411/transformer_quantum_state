@@ -20,10 +20,15 @@ from SR import SR
 
 class Optimizer:
     def __init__(self, model, Hamiltonians, point_of_interest=None):
+        # Transformer model to optimize
         self.model = model
 
         self.Hamiltonians = Hamiltonians
+
+        # E.g., fixed J, h in [0.5, 1.5]
         self.model.param_range = Hamiltonians[0].param_range
+
+        # Loss function and actual optimization algorithm
         self.loss_fn = nn.MSELoss()
         self.optim = torch.optim.Adam(
             self.model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9
@@ -39,6 +44,7 @@ class Optimizer:
         self.ckpt_freq = 10000
         self.point_of_interest = point_of_interest
 
+    # A schedule used for an adaptive learning rate
     @staticmethod
     def lr_schedule(step, model_size, factor=5.0, warmup=4000, start_step=0):
         # using the lr schedule from the paper: Attention is all you need

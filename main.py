@@ -22,17 +22,22 @@ try:
 except FileExistsError:
     pass
 
+# Sizes of Ising chains to explore
 system_sizes = np.arange(10, 41, 2).reshape(-1, 1)
 
+# Ising Hamiltonians
 Hamiltonians = [Ising(system_size_i, periodic=False) for system_size_i in system_sizes]
 
+# dim(J)
 param_dim = Hamiltonians[0].param_dim
+# Number of embedding dimensions (e.g., after passing through grey layers)
 embedding_size = 32
-n_head = 8
-n_hid = embedding_size
-n_layers = 8
-dropout = 0
-minibatch = 10000
+# Transformer hyperparameters
+n_head = 8  # Attention heads
+n_hid = embedding_size  # Number of hidden units in the feedforward network
+n_layers = 8  # Number of transformer layers
+dropout = 0  # Dropout rate
+minibatch = 10000  # Batch size
 
 model = TransformerModel(
     system_sizes,
