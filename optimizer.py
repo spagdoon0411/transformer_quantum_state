@@ -28,7 +28,11 @@ class Optimizer:
         # E.g., fixed J, h in [0.5, 1.5]
         self.model.param_range = Hamiltonians[0].param_range
 
-        # Loss function and actual optimization algorithm
+        # TODO: self.loss_fn is never used in this definition, but that does
+        # not necessarily mean it is never used. However, it does not seem to be
+        # accessed in the rest of the code (the relevant parts being main.py
+        # and the train function below). VSCode's global text search tool finds
+        # no other occurrences/accesses.
         self.loss_fn = nn.MSELoss()
         self.optim = torch.optim.Adam(
             self.model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9
@@ -58,6 +62,10 @@ class Optimizer:
     def minimize_energy_step(self, H, batch, max_unique, use_symmetry=True):
         symmetry = H.symmetry if use_symmetry else None
         samples, sample_weight = sample(self.model, batch, max_unique, symmetry)
+
+        # This is the expectation value of <H> over the probability distribution captured
+        # by the sample function (i.e., the probability distribution associated with the
+        # wave function represented by the model).
         E = H.Eloc(samples, sample_weight, self.model, use_symmetry)
         E_mean = (E * sample_weight).sum()
         E_var = (
@@ -68,6 +76,15 @@ class Optimizer:
         )
         Er = (E_mean.real / H.n).detach().cpu().numpy()
         Ei = (E_mean.imag / H.n).detach().cpu().numpy()
+
+        # NOTE: this is NOT the gradient of the loss function (the loss function being
+        # <H> over \psi* times \psi); compute_grad is a misnomer for this function.
+        # It should be called compute_loss (or, more verbosely, get_loss_computation_graph).
+        # The gradient of the <H> function is computed by calling .backward() on the first
+        # tuple member that compute_grad returns--and, in fact, .backward uses the
+        # those calculated derivatives to adjust the model's parameters in this step. (Abstracted
+        # away is reverse-mode automatic differentiation, which provides local gradients).
+
         loss, log_amp, log_phase = compute_grad(
             self.model, samples, sample_weight, E, symmetry
         )
@@ -165,11 +182,25 @@ class Optimizer:
                 optim.step()
             else:
                 optim.zero_grad()
+
+                # TODO: The loss object's computation graph is stored by
+                # PyTorch. Involved in its computation was the model's forward
+                # pass, and therefore the model's layers are a part of that
+                # computation graph.
+                #
+                # Therefore, it makes sense that loss.backward() would perform
+                # both reverse-mode automatic differentiation and, where it
+                # encounters registered model parameters, adustments via backpropagation
+                # (a simple adaptation from reverse-mode AD).
                 loss.backward()
                 optim.step()
 
             scheduler.step()
             t2 = time.time()
+
+            # NOTE: everything below this point is just for logging and saving. Is an
+            # example of how separation of concerns could be improved in the codebase
+            # (e.g., by moving this to a separate function).
 
             print_str = f"E_real = {Er:.6f}\t E_imag = {Ei:.6f}\t E_var = {E_var:.6f}\t"
             E_curve[i - start_iter] = Er

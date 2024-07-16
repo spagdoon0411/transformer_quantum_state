@@ -60,10 +60,10 @@ class Hamiltonian:
 
     def update_param(self, param):
         """
-            Update the coefficients in the Hamiltonian in list form
-            Default implementation require coef to be (n_op, ), same in every group
-            One should override this function for specific Hamiltonians in other forms
-            param: (n_param, )
+        Update the coefficients in the Hamiltonian in list form
+        Default implementation require coef to be (n_op, ), same in every group
+        One should override this function for specific Hamiltonians in other forms
+        param: (n_param, )
         """
         assert len(param) == len(self.H)
         for i, param_i in enumerate(param):  # (1, )
@@ -76,9 +76,44 @@ class Hamiltonian:
         E = 0
         params = model.param  # (n_param, )
         self.update_param(params)
+
+        # Iterate over terms in the Hamiltonian, treating each term as
+        # its own observable. Each Hi is of the form
+        # (pauli_str, coef, spin_idx), where pauli_str is a list of strings over the alphabet
+        # {'X', 'Y', 'Z'}, coef is a list of scalars, and spin_idx is a tensor of indices that the
+        # operators act on. TODO: Hypothesis: the first dimension of spin_idx should match the length of the
+        # pauli_strs, and the second dimension can be arbitrary (n_op, n_index_groups).
+
+        # Note that any single Hi shares the spin groupings it acts on.
         for Hi in self.H:
             # list of tensors, (n_op, batch)
-            O = compute_observable(model, samples, sample_weight, Hi, batch_mean=False, symmetry=symmetry)
+
+            # Any Hi contains a list of Pauli strings, a list of coefficients, and a tensor of indices--
+            # and thus it separates an observable into parts. compute_observable will return a list
+            # of values, one for each part of the observable.
+
+            # TODO: what's an example of an observable that would habe multiple parts, with multiple
+            # pauli strings and coefficients?
+
+            # TODO: it seems that the parts of a single observable are always in a term-in-a-linear-combination
+            # relationship with the other parts, with the coefficients determining the linear combination weights.
+
+            # O := [coef1 * value1, coef2 * value2, ...]
+
+            O = compute_observable(
+                model, samples, sample_weight, Hi, batch_mean=False, symmetry=symmetry
+            )
+
+            # Sum over coefk * valuek members in O (via .sum), then add this Hamiltonian
+            # term's contribution to the total energy.
+
+            # NOTE: compute_observable finds expected values of observables using the samples
+            # provided to it, so the sum of the values in O is <H>--which is the variational energy
+            # estimation ground state upper bound.
+            #
+            # In particular, <H> is an expected value over the probabilitiy distribution
+            # |\psi(\vec s, \vec J)|^2,
+
             for Oj in O:
                 E += Oj.sum(dim=0)
         return E
@@ -91,7 +126,7 @@ class Hamiltonian:
             full_Hamiltonian = self.full_H()
         else:
             full_Hamiltonian = self.full_H(param)
-        [E_ground, psi_ground] = eigsh(full_Hamiltonian, k=1, which='SA')
+        [E_ground, psi_ground] = eigsh(full_Hamiltonian, k=1, which="SA")
         E_ground = E_ground[0]
         psi_ground = psi_ground[:, 0]
         self.E_ground = E_ground
@@ -104,17 +139,17 @@ class Hamiltonian:
     def add_spatial_symmetry(self):
         if self.n_dim == 1:
             self.symmetry = Symmetry1D(self.n)
-            self.symmetry.add_symmetry('translation')
-            self.symmetry.add_symmetry('reflection')
+            self.symmetry.add_symmetry("translation")
+            self.symmetry.add_symmetry("reflection")
         elif self.n_dim == 2:
             self.symmetry = Symmetry2D(self.system_size[0], self.system_size[1])
-            self.symmetry.add_symmetry('translation_x')
-            self.symmetry.add_symmetry('translation_y')
-            self.symmetry.add_symmetry('reflection_x')
+            self.symmetry.add_symmetry("translation_x")
+            self.symmetry.add_symmetry("translation_y")
+            self.symmetry.add_symmetry("reflection_x")
             if self.system_size[0] == self.system_size[1]:
-                self.symmetry.add_symmetry('rotation_90')
+                self.symmetry.add_symmetry("rotation_90")
             else:
-                self.symmetry.add_symmetry('reflection_y')
+                self.symmetry.add_symmetry("reflection_y")
 
     def measurements(self, psi, n_measure=1000):
         samples = np.zeros((n_measure, self.n))
@@ -135,16 +170,22 @@ class Ising(Hamiltonian):
         self.h = 1
         self.n_dim = len(self.system_size)
         self.periodic = periodic
-        self.connections = generate_spin_idx(self.system_size, 'nearest_neighbor', periodic)
-        self.external_field = generate_spin_idx(self.system_size, 'external_field', periodic)
-        self.H = [(['ZZ'], [self.J], self.connections),
-                  (['X'], [self.h], self.external_field)]
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.external_field = generate_spin_idx(
+            self.system_size, "external_field", periodic
+        )
+        self.H = [
+            (["ZZ"], [self.J], self.connections),
+            (["X"], [self.h], self.external_field),
+        ]
 
         # TODO: implement 2D symmetry
-        assert self.n_dim == 1, '2D symmetry is not implemented yet'
+        assert self.n_dim == 1, "2D symmetry is not implemented yet"
         self.symmetry = Symmetry1D(self.n)
-        self.symmetry.add_symmetry('reflection')
-        self.symmetry.add_symmetry('spin_inversion')
+        self.symmetry.add_symmetry("reflection")
+        self.symmetry.add_symmetry("spin_inversion")
         # self.momentum = 1  # k=0, exp(i k pi)=1
         # self.parity = 1
         # self.Z2 = [1, -1][self.n % 2]
@@ -152,41 +193,42 @@ class Ising(Hamiltonian):
         # self.symmetry.add_symmetry('reflection', self.parity)
         # self.symmetry.add_symmetry('spin_inversion', self.Z2)
 
-
     def update_param(self, param):
         # param: (1, )
         self.H[1][1][0] = param
 
+    # Overrides the "full_H" function in the Hamiltonian superclass, implementing
+    # the particular full TFIM Hamiltonian. We get a sparse matrix from this.
     def full_H(self, param=1):
         if isinstance(param, torch.Tensor):
             param = param.detach().cpu().numpy().item()
         h = param
-        self.Hamiltonian = sparse.csr_matrix((2 ** self.n, 2 ** self.n), dtype=np.float64)
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn in self.connections:
             JZZ = 1
             for i in range(self.n):
                 if i == conn[0]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
                 elif i == conn[1]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
                 else:
-                    JZZ = sparse.kron(JZZ, I, format='csr')
+                    JZZ = sparse.kron(JZZ, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + self.J * JZZ
         for i in range(self.n):
             hX = 1
             for j in range(self.n):
                 if i == j:
-                    hX = sparse.kron(hX, X, format='csr')
+                    hX = sparse.kron(hX, X, format="csr")
                 else:
-                    hX = sparse.kron(hX, I, format='csr')
+                    hX = sparse.kron(hX, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + h * hX
         return self.Hamiltonian
 
     def DMRG(self, param=None, verbose=False, conserve=None):
         # Tenpy has S_i = 0.5 sigma_i, mine doesn't have the 0.5
         # some constants are added to fix the 0.5
-        assert self.n_dim == 1, 'currently only supports 1D'
-        assert self.periodic is False, 'currently only supports non-periodic'
+        assert self.n_dim == 1, "currently only supports 1D"
+        assert self.periodic is False, "currently only supports non-periodic"
         if param is None:
             h = self.h
         else:
@@ -200,32 +242,39 @@ class Ising(Hamiltonian):
             Jy=0,
             Jz=J,  # couplings
             hx=-h / 2,
-            bc_MPS='finite',
-            conserve=conserve)
+            bc_MPS="finite",
+            conserve=conserve,
+        )
         M = SpinModel(model_params)
-        product_state = (["up", "down"] * int(self.n / 2 + 1))[:self.n]  # initial Neel state
+        product_state = (["up", "down"] * int(self.n / 2 + 1))[
+            : self.n
+        ]  # initial Neel state
         psi = MPS.from_product_state(M.lat.mps_sites(), product_state, bc=M.lat.bc_MPS)
         dmrg_params = {
-            'mixer': None,  # setting this to True helps to escape local minima
-            'trunc_params': {
-                'chi_max': 100,
-                'svd_min': 1.e-10,
+            "mixer": None,  # setting this to True helps to escape local minima
+            "trunc_params": {
+                "chi_max": 100,
+                "svd_min": 1.0e-10,
             },
-            'max_E_err': 1.e-10,
-            'combine': True
+            "max_E_err": 1.0e-10,
+            "combine": True,
         }
         info = dmrg.run(psi, M, dmrg_params)
-        E = info['E']
+        E = info["E"]
         if verbose:
             print("finite DMRG, Transverse field Ising model")
             print("Jz={Jz:.2f}, conserve={conserve!r}".format(Jz=J, conserve=conserve))
             print("E = {E:.13f}".format(E=E))
             print("final bond dimensions: ", psi.chi)
-            Sz = psi.expectation_value("Sz")  # Sz instead of Sigma z: spin-1/2 operators!
+            Sz = psi.expectation_value(
+                "Sz"
+            )  # Sz instead of Sigma z: spin-1/2 operators!
             mag_z = np.mean(Sz)
-            print("<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(Sz0=Sz[0],
-                                                                             Sz1=Sz[1],
-                                                                             mag_z=mag_z))
+            print(
+                "<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(
+                    Sz0=Sz[0], Sz1=Sz[1], mag_z=mag_z
+                )
+            )
         return E * 4, psi, M
 
     # def DMRG(self, param=None, verbose=False):
@@ -275,16 +324,22 @@ class XXZ(Hamiltonian):
         self.h = 1
         self.Delta = 1
         self.periodic = periodic
-        self.connections = generate_spin_idx(self.system_size, 'nearest_neighbor', periodic)
-        self.external_field = generate_spin_idx(self.system_size, 'external_field', periodic)
-        self.H = [(['XX', 'YY', 'ZZ'], [self.J, self.J, self.Delta], self.connections),
-                  (['X'], [self.h], self.external_field)]
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.external_field = generate_spin_idx(
+            self.system_size, "external_field", periodic
+        )
+        self.H = [
+            (["XX", "YY", "ZZ"], [self.J, self.J, self.Delta], self.connections),
+            (["X"], [self.h], self.external_field),
+        ]
         # TODO: implement 2D symmetry
-        assert self.n_dim == 1, '2D symmetry is not implemented yet'
+        assert self.n_dim == 1, "2D symmetry is not implemented yet"
         self.symmetry = Symmetry1D(self.n)
-        self.symmetry.add_symmetry('reflection')
-        self.symmetry.add_symmetry('spin_inversion')
-        self.symmetry.add_symmetry('U1')
+        self.symmetry.add_symmetry("reflection")
+        self.symmetry.add_symmetry("spin_inversion")
+        self.symmetry.add_symmetry("U1")
         # self.momentum = [1, (1j * 2 * pi * (self.n / 4).round() / self.n).exp(),
         #                  -1, (1j * 2 * pi * (self.n / 4).round() / self.n).exp()][self.n % 4]
         # self.parity = [1, 1, -1, 1][self.n % 4]
@@ -306,40 +361,40 @@ class XXZ(Hamiltonian):
             param = param.detach().cpu().numpy()
         h, Delta = param
         J = self.J
-        self.Hamiltonian = sparse.csr_matrix((2 ** self.n, 2 ** self.n), dtype=np.float64)
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn in self.connections:
             JZZ = 1
             Jpm = 1
             Jmp = 1
             for i in range(self.n):
                 if i == conn[0]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sp, format='csr')
-                    Jmp = sparse.kron(Jmp, Sm, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sp, format="csr")
+                    Jmp = sparse.kron(Jmp, Sm, format="csr")
                 elif i == conn[1]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sm, format='csr')
-                    Jmp = sparse.kron(Jmp, Sp, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sm, format="csr")
+                    Jmp = sparse.kron(Jmp, Sp, format="csr")
                 else:
-                    JZZ = sparse.kron(JZZ, I, format='csr')
-                    Jpm = sparse.kron(Jpm, I, format='csr')
-                    Jmp = sparse.kron(Jmp, I, format='csr')
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+                    Jpm = sparse.kron(Jpm, I, format="csr")
+                    Jmp = sparse.kron(Jmp, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + Delta * JZZ + 2 * J * (Jpm + Jmp)
         for i in range(self.n):
             hX = 1
             for j in range(self.n):
                 if i == j:
-                    hX = sparse.kron(hX, X, format='csr')
+                    hX = sparse.kron(hX, X, format="csr")
                 else:
-                    hX = sparse.kron(hX, I, format='csr')
+                    hX = sparse.kron(hX, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + h * hX
         return self.Hamiltonian
 
     def DMRG(self, param=None, verbose=False, conserve=None):
         # Tenpy has S_i = 0.5 sigma_i, mine doesn't have the 0.5
         # some constants are added to fix the 0.5
-        assert self.n_dim == 1, 'currently only supports 1D'
-        assert self.periodic is False, 'currently only supports non-periodic'
+        assert self.n_dim == 1, "currently only supports 1D"
+        assert self.periodic is False, "currently only supports non-periodic"
         if param is None:
             h = self.h
             Delta = self.Delta
@@ -355,31 +410,40 @@ class XXZ(Hamiltonian):
             Jy=J,
             Jz=Delta,  # couplings
             hx=-h / 2,
-            bc_MPS='finite',
-            conserve=conserve)
+            bc_MPS="finite",
+            conserve=conserve,
+        )
         M = SpinModel(model_params)
-        product_state = (["up", "down"] * int(self.n / 2 + 1))[:self.n]  # initial Neel state
+        product_state = (["up", "down"] * int(self.n / 2 + 1))[
+            : self.n
+        ]  # initial Neel state
         psi = MPS.from_product_state(M.lat.mps_sites(), product_state, bc=M.lat.bc_MPS)
         dmrg_params = {
-            'mixer': True,  # setting this to True helps to escape local minima
-            'trunc_params': {
-                'chi_max': 100,
-                'svd_min': 1.e-10,
+            "mixer": True,  # setting this to True helps to escape local minima
+            "trunc_params": {
+                "chi_max": 100,
+                "svd_min": 1.0e-10,
             },
-            'max_E_err': 1.e-10,
+            "max_E_err": 1.0e-10,
         }
         info = dmrg.run(psi, M, dmrg_params)
-        E = info['E']
+        E = info["E"]
         if verbose:
             print("finite DMRG, Heisenberg XXZ chain")
-            print("Jz={Jz:.2f}, conserve={conserve!r}".format(Jz=Delta, conserve=conserve))
+            print(
+                "Jz={Jz:.2f}, conserve={conserve!r}".format(Jz=Delta, conserve=conserve)
+            )
             print("E = {E:.13f}".format(E=E))
             print("final bond dimensions: ", psi.chi)
-            Sz = psi.expectation_value("Sz")  # Sz instead of Sigma z: spin-1/2 operators!
+            Sz = psi.expectation_value(
+                "Sz"
+            )  # Sz instead of Sigma z: spin-1/2 operators!
             mag_z = np.mean(Sz)
-            print("<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(Sz0=Sz[0],
-                                                                             Sz1=Sz[1],
-                                                                             mag_z=mag_z))
+            print(
+                "<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(
+                    Sz0=Sz[0], Sz1=Sz[1], mag_z=mag_z
+                )
+            )
             # note: it's clear that mean(<Sz>) is 0: the model has Sz conservation!
         return E * 4, psi, M
 
@@ -396,10 +460,20 @@ class XYZ(Hamiltonian):
         self.Delta = 1
         self.gamma = 0
         self.periodic = periodic
-        self.connections = generate_spin_idx(self.system_size, 'nearest_neighbor', periodic)
-        self.external_field = generate_spin_idx(self.system_size, 'external_field', periodic)
-        self.H = [(['XX', 'YY', 'ZZ'], [1 + self.gamma, 1 - self.gamma, self.Delta], self.connections),
-                  (['Z'], [self.h], self.external_field)]
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.external_field = generate_spin_idx(
+            self.system_size, "external_field", periodic
+        )
+        self.H = [
+            (
+                ["XX", "YY", "ZZ"],
+                [1 + self.gamma, 1 - self.gamma, self.Delta],
+                self.connections,
+            ),
+            (["Z"], [self.h], self.external_field),
+        ]
         self.symmetry = None
 
     def update_param(self, param):
@@ -415,40 +489,42 @@ class XYZ(Hamiltonian):
         elif isinstance(param, torch.Tensor):
             param = param.detach().cpu().numpy()
         h, Delta, gamma = param
-        self.Hamiltonian = sparse.csr_matrix((2 ** self.n, 2 ** self.n), dtype=np.float64)
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn in self.connections:
             JZZ = 1
             JXX = 1
             JYY = 1
             for i in range(self.n):
                 if i == conn[0]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    JXX = sparse.kron(JXX, X, format='csr')
-                    JYY = sparse.kron(JYY, Y, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    JXX = sparse.kron(JXX, X, format="csr")
+                    JYY = sparse.kron(JYY, Y, format="csr")
                 elif i == conn[1]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    JXX = sparse.kron(JXX, X, format='csr')
-                    JYY = sparse.kron(JYY, Y, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    JXX = sparse.kron(JXX, X, format="csr")
+                    JYY = sparse.kron(JYY, Y, format="csr")
                 else:
-                    JZZ = sparse.kron(JZZ, I, format='csr')
-                    JXX = sparse.kron(JXX, I, format='csr')
-                    JYY = sparse.kron(JYY, I, format='csr')
-            self.Hamiltonian = self.Hamiltonian + (1 + gamma) * JXX + (1 - gamma) * JYY + Delta * JZZ
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+                    JXX = sparse.kron(JXX, I, format="csr")
+                    JYY = sparse.kron(JYY, I, format="csr")
+            self.Hamiltonian = (
+                self.Hamiltonian + (1 + gamma) * JXX + (1 - gamma) * JYY + Delta * JZZ
+            )
         for i in range(self.n):
             hZ = 1
             for j in range(self.n):
                 if i == j:
-                    hZ = sparse.kron(hZ, Z, format='csr')
+                    hZ = sparse.kron(hZ, Z, format="csr")
                 else:
-                    hZ = sparse.kron(hZ, I, format='csr')
+                    hZ = sparse.kron(hZ, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + h * hZ
         return self.Hamiltonian
 
     def DMRG(self, param=None, verbose=False, conserve=None):
         # Tenpy has S_i = 0.5 sigma_i, mine doesn't have the 0.5
         # some constants are added to fix the 0.5
-        assert self.n_dim == 1, 'currently only supports 1D'
-        assert self.periodic is False, 'currently only supports non-periodic'
+        assert self.n_dim == 1, "currently only supports 1D"
+        assert self.periodic is False, "currently only supports non-periodic"
         if param is None:
             h = self.h
             Delta = self.Delta
@@ -465,32 +541,41 @@ class XYZ(Hamiltonian):
             Jy=1 - gamma,
             Jz=Delta,  # couplings
             hz=-h / 2,
-            bc_MPS='finite',
-            conserve=conserve)
+            bc_MPS="finite",
+            conserve=conserve,
+        )
         M = SpinModel(model_params)
         # product_state = ["up"] * M.lat.N_sites
-        product_state = (["up", "down"] * int(self.n / 2 + 1))[:self.n]  # initial Neel state
+        product_state = (["up", "down"] * int(self.n / 2 + 1))[
+            : self.n
+        ]  # initial Neel state
         psi = MPS.from_product_state(M.lat.mps_sites(), product_state, bc=M.lat.bc_MPS)
         dmrg_params = {
-            'mixer': True,  # setting this to True helps to escape local minima
-            'trunc_params': {
-                'chi_max': 100,
-                'svd_min': 1.e-10,
+            "mixer": True,  # setting this to True helps to escape local minima
+            "trunc_params": {
+                "chi_max": 100,
+                "svd_min": 1.0e-10,
             },
-            'max_E_err': 1.e-10,
+            "max_E_err": 1.0e-10,
         }
         info = dmrg.run(psi, M, dmrg_params)
-        E = info['E']
+        E = info["E"]
         if verbose:
             print("finite DMRG, Heisenberg XYZ chain")
-            print("Jz={Jz:.2f}, conserve={conserve!r}".format(Jz=Delta, conserve=conserve))
+            print(
+                "Jz={Jz:.2f}, conserve={conserve!r}".format(Jz=Delta, conserve=conserve)
+            )
             print("E = {E:.13f}".format(E=E))
             print("final bond dimensions: ", psi.chi)
-            Sz = psi.expectation_value("Sz")  # Sz instead of Sigma z: spin-1/2 operators!
+            Sz = psi.expectation_value(
+                "Sz"
+            )  # Sz instead of Sigma z: spin-1/2 operators!
             mag_z = np.mean(Sz)
-            print("<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(Sz0=Sz[0],
-                                                                             Sz1=Sz[1],
-                                                                             mag_z=mag_z))
+            print(
+                "<S_z> = [{Sz0:.5f}, {Sz1:.5f}]; mean ={mag_z:.5f}".format(
+                    Sz0=Sz[0], Sz1=Sz[1], mag_z=mag_z
+                )
+            )
         return E * 4, psi, M
 
 
@@ -505,38 +590,40 @@ class Heisenberg2D(Hamiltonian):
         self.param_range = torch.zeros(2, 0)
         self.J = 1
         self.periodic = periodic
-        self.connections = generate_spin_idx(self.system_size, 'nearest_neighbor', periodic)
-        self.H = [(['XX', 'YY', 'ZZ'], [-self.J, -self.J, self.J], self.connections)]
+        self.connections = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )
+        self.H = [(["XX", "YY", "ZZ"], [-self.J, -self.J, self.J], self.connections)]
 
         self.symmetry = Symmetry2D(self.system_size[0], self.system_size[1])
-        self.symmetry.add_symmetry('reflection_x')
-        self.symmetry.add_symmetry('reflection_y')
-        self.symmetry.add_symmetry('spin_inversion')
-        self.symmetry.add_symmetry('U1')
+        self.symmetry.add_symmetry("reflection_x")
+        self.symmetry.add_symmetry("reflection_y")
+        self.symmetry.add_symmetry("spin_inversion")
+        self.symmetry.add_symmetry("U1")
 
     def update_param(self, param):
         pass
 
     def full_H(self, param=None):
         J = self.J
-        self.Hamiltonian = sparse.csr_matrix((2 ** self.n, 2 ** self.n), dtype=np.float64)
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn in self.connections:
             JZZ = 1
             Jpm = 1
             Jmp = 1
             for i in range(self.n):
                 if i == conn[0]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sp, format='csr')
-                    Jmp = sparse.kron(Jmp, Sm, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sp, format="csr")
+                    Jmp = sparse.kron(Jmp, Sm, format="csr")
                 elif i == conn[1]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sm, format='csr')
-                    Jmp = sparse.kron(Jmp, Sp, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sm, format="csr")
+                    Jmp = sparse.kron(Jmp, Sp, format="csr")
                 else:
-                    JZZ = sparse.kron(JZZ, I, format='csr')
-                    Jpm = sparse.kron(Jpm, I, format='csr')
-                    Jmp = sparse.kron(Jmp, I, format='csr')
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+                    Jpm = sparse.kron(Jpm, I, format="csr")
+                    Jmp = sparse.kron(Jmp, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + J * JZZ - 2 * J * (Jpm + Jmp)
         return self.Hamiltonian
 
@@ -558,32 +645,76 @@ class J1J2(Hamiltonian):
         self.J2 = 0.5
         self.periodic = periodic
         self.sign_rule = sign_rule
-        self.J1_conn = generate_spin_idx(self.system_size, 'nearest_neighbor', periodic)  # (n_J1_conn, 2)
-        self.J2_conn = generate_spin_idx(self.system_size, 'next_nearest_neighbor', periodic)  # (n_J2_conn, 2)
+        self.J1_conn = generate_spin_idx(
+            self.system_size, "nearest_neighbor", periodic
+        )  # (n_J1_conn, 2)
+        self.J2_conn = generate_spin_idx(
+            self.system_size, "next_nearest_neighbor", periodic
+        )  # (n_J2_conn, 2)
         self.n_J1_conn = len(self.J1_conn)
         self.n_J2_conn = len(self.J2_conn)
         self.n_conn = self.n_J1_conn + self.n_J2_conn
         if sign_rule == 0:
-            coef = torch.cat([self.J1 * torch.ones(self.n_J1_conn), self.J2 * torch.ones(self.n_J2_conn)],
-                             dim=0)  # (n_conn, )
-            self.connections = torch.cat([self.J1_conn, self.J2_conn], dim=0)  # (n_conn, 2)
-            self.H = [(['XX', 'YY', 'ZZ'], [coef] * 3, self.connections)]
+            coef = torch.cat(
+                [
+                    self.J1 * torch.ones(self.n_J1_conn),
+                    self.J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )  # (n_conn, )
+            self.connections = torch.cat(
+                [self.J1_conn, self.J2_conn], dim=0
+            )  # (n_conn, 2)
+            self.H = [(["XX", "YY", "ZZ"], [coef] * 3, self.connections)]
         elif sign_rule == 1:
-            coef_xy = torch.cat([-self.J1 * torch.ones(self.n_J1_conn), self.J2 * torch.ones(self.n_J2_conn)],
-                                dim=0)  # (n_conn, )
-            coef_z = torch.cat([self.J1 * torch.ones(self.n_J1_conn), self.J2 * torch.ones(self.n_J2_conn)],
-                               dim=0)  # (n_conn, )
-            self.connections = torch.cat([self.J1_conn, self.J2_conn], dim=0)  # (n_conn, 2)
-            self.H = [(['XX', 'YY', 'ZZ'], [coef_xy, coef_xy, coef_z], self.connections)]
+            coef_xy = torch.cat(
+                [
+                    -self.J1 * torch.ones(self.n_J1_conn),
+                    self.J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )  # (n_conn, )
+            coef_z = torch.cat(
+                [
+                    self.J1 * torch.ones(self.n_J1_conn),
+                    self.J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )  # (n_conn, )
+            self.connections = torch.cat(
+                [self.J1_conn, self.J2_conn], dim=0
+            )  # (n_conn, 2)
+            self.H = [
+                (["XX", "YY", "ZZ"], [coef_xy, coef_xy, coef_z], self.connections)
+            ]
         elif sign_rule == 2:
-            self.J1_conn_h = generate_spin_idx(self.system_size, 'nn_horizontal', periodic)  # (n_J1_conn_h, 2)
-            self.J1_conn_v = generate_spin_idx(self.system_size, 'nn_vertical', periodic)  # (n_J1_conn_v, 2)
-            self.connections = torch.cat([self.J1_conn_h, self.J1_conn_v, self.J2_conn], dim=0)  # (n_conn, 2)
-            coef_xy = torch.cat([self.J1 * torch.ones(len(self.J1_conn_h)), -self.J1 * torch.ones(len(self.J1_conn_v)),
-                                 -self.J2 * torch.ones(self.n_J2_conn)], dim=0)  # (n_conn, )
-            coef_z = torch.cat([self.J1 * torch.ones(self.n_J1_conn), self.J2 * torch.ones(self.n_J2_conn)],
-                               dim=0)
-            self.H = [(['XX', 'YY', 'ZZ'], [coef_xy, coef_xy, coef_z], self.connections)]
+            self.J1_conn_h = generate_spin_idx(
+                self.system_size, "nn_horizontal", periodic
+            )  # (n_J1_conn_h, 2)
+            self.J1_conn_v = generate_spin_idx(
+                self.system_size, "nn_vertical", periodic
+            )  # (n_J1_conn_v, 2)
+            self.connections = torch.cat(
+                [self.J1_conn_h, self.J1_conn_v, self.J2_conn], dim=0
+            )  # (n_conn, 2)
+            coef_xy = torch.cat(
+                [
+                    self.J1 * torch.ones(len(self.J1_conn_h)),
+                    -self.J1 * torch.ones(len(self.J1_conn_v)),
+                    -self.J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )  # (n_conn, )
+            coef_z = torch.cat(
+                [
+                    self.J1 * torch.ones(self.n_J1_conn),
+                    self.J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )
+            self.H = [
+                (["XX", "YY", "ZZ"], [coef_xy, coef_xy, coef_z], self.connections)
+            ]
         else:
             raise ValueError("sign_rule must be 0, 1, or 2")
         # self.Px = 1
@@ -593,8 +724,8 @@ class J1J2(Hamiltonian):
         # self.symmetry.add_symmetry('reflection_x', self.Px)
         # self.symmetry.add_symmetry('reflection_y', self.Py)
         # self.symmetry.add_symmetry('spin_inversion', self.Z2)
-        self.symmetry.add_symmetry('spin_inversion')
-        self.symmetry.add_symmetry('U1')
+        self.symmetry.add_symmetry("spin_inversion")
+        self.symmetry.add_symmetry("U1")
 
         # self.symmetry = None
 
@@ -603,55 +734,72 @@ class J1J2(Hamiltonian):
         J1 = self.J1
         J2 = param
         if self.sign_rule == 0:
-            coef = torch.cat([J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)], dim=0)
+            coef = torch.cat(
+                [J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
+                dim=0,
+            )
             new_coef = [coef] * 3
         elif self.sign_rule == 1:
-            coef_xy = torch.cat([-J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
-                                dim=0)  # (n_conn, )
-            coef_z = torch.cat([J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
-                               dim=0)  # (n_conn, )
+            coef_xy = torch.cat(
+                [-J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
+                dim=0,
+            )  # (n_conn, )
+            coef_z = torch.cat(
+                [J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
+                dim=0,
+            )  # (n_conn, )
             new_coef = [coef_xy, coef_xy, coef_z]
         elif self.sign_rule == 2:
-            coef_xy = torch.cat([J1 * torch.ones(len(self.J1_conn_h)), -J1 * torch.ones(len(self.J1_conn_v)),
-                                 -J2 * torch.ones(self.n_J2_conn)], dim=0)
-            coef_z = torch.cat([J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
-                               dim=0)
+            coef_xy = torch.cat(
+                [
+                    J1 * torch.ones(len(self.J1_conn_h)),
+                    -J1 * torch.ones(len(self.J1_conn_v)),
+                    -J2 * torch.ones(self.n_J2_conn),
+                ],
+                dim=0,
+            )
+            coef_z = torch.cat(
+                [J1 * torch.ones(self.n_J1_conn), J2 * torch.ones(self.n_J2_conn)],
+                dim=0,
+            )
             new_coef = [coef_xy, coef_xy, coef_z]
         else:
-            raise ValueError(f'sign_rule {self.sign_rule} not supported')
+            raise ValueError(f"sign_rule {self.sign_rule} not supported")
         self.H[0][1][0:3] = new_coef
 
     def full_H(self, param=0.5):
         if isinstance(param, torch.Tensor):
             param = param.detach().cpu().numpy().item()
         self.update_param(param)
-        self.Hamiltonian = sparse.csr_matrix((2 ** self.n, 2 ** self.n), dtype=np.float64)
+        self.Hamiltonian = sparse.csr_matrix((2**self.n, 2**self.n), dtype=np.float64)
         for conn_idx, conn in enumerate(self.connections):
             JZZ = 1
             Jpm = 1
             Jmp = 1
             for i in range(self.n):
                 if i == conn[0]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sp, format='csr')
-                    Jmp = sparse.kron(Jmp, Sm, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sp, format="csr")
+                    Jmp = sparse.kron(Jmp, Sm, format="csr")
                 elif i == conn[1]:
-                    JZZ = sparse.kron(JZZ, Z, format='csr')
-                    Jpm = sparse.kron(Jpm, Sm, format='csr')
-                    Jmp = sparse.kron(Jmp, Sp, format='csr')
+                    JZZ = sparse.kron(JZZ, Z, format="csr")
+                    Jpm = sparse.kron(Jpm, Sm, format="csr")
+                    Jmp = sparse.kron(Jmp, Sp, format="csr")
                 else:
-                    JZZ = sparse.kron(JZZ, I, format='csr')
-                    Jpm = sparse.kron(Jpm, I, format='csr')
-                    Jmp = sparse.kron(Jmp, I, format='csr')
+                    JZZ = sparse.kron(JZZ, I, format="csr")
+                    Jpm = sparse.kron(Jpm, I, format="csr")
+                    Jmp = sparse.kron(Jmp, I, format="csr")
             coef_xy = self.H[0][1][0][conn_idx].detach().cpu().numpy().item()
             coef_z = self.H[0][1][2][conn_idx].detach().cpu().numpy().item()
-            self.Hamiltonian = self.Hamiltonian + coef_z * JZZ + 2 * coef_xy * (Jpm + Jmp)
+            self.Hamiltonian = (
+                self.Hamiltonian + coef_z * JZZ + 2 * coef_xy * (Jpm + Jmp)
+            )
         return self.Hamiltonian
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
-        os.mkdir('results/')
+        os.mkdir("results/")
     except FileExistsError:
         pass
     ns = np.arange(10, 80, 2)
@@ -661,8 +809,8 @@ if __name__ == '__main__':
         H = Ising([n], periodic=False)
         E_dmrg, psi, M = H.DMRG(param, verbose=True)
         E_dmrgs[i] = E_dmrg / n
-        print(f'n = {n}, E_dmrg = {E_dmrg/n}')
-        with open(f'results/{type(H).__name__}_E_sizes.npy', 'wb') as f:
+        print(f"n = {n}, E_dmrg = {E_dmrg/n}")
+        with open(f"results/{type(H).__name__}_E_sizes.npy", "wb") as f:
             np.save(f, E_dmrgs)
 
     # H = Ising([10], periodic=False)

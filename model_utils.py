@@ -281,11 +281,25 @@ def compute_grad(model, samples, sample_weight, Eloc, symmetry=None):
 
     """
 
+    # sample_weight is the relative frequences (containing the particular probability
+    # distribution/wave function information) produced as sample_count in the
+    # sample function in this file.
+
     log_amp, log_phase = compute_psi(model, samples, symmetry, check_duplicate=False)
+
+    # This is the estimate of the energy of the state the model models.
+    # Is a dot product of Eloc for each sample with a vector of sample weights.
     E_model = (Eloc * sample_weight).sum().detach()  # (1, )
+
+    # TODO: Importance of scaling? See (B5) on page 7 of Zhang and Ventra's TQS paper.
+    # Hamiltonians/variational energy estimators are scaled by the inverse of their
+    # of their absolute value. The authors mention that "the variance of the gradient
+    # can be minimized by subtracting a baseline energy"; E_model is that baseline energy.
+
     scale = 1 / E_model.abs()
     if scale > 5:
         scale = 5
+
     E = Eloc - E_model  # (batch, )
 
     loss = ((E.real * log_amp + E.imag * log_phase) * sample_weight).sum() * scale
@@ -312,7 +326,7 @@ def compute_observable(
         grouping up operators that act on the same indices to speed up
         (e.g., interaction in the Heisenberg model)
         pauli_str: string made up of 'X', 'Y', or 'Z', Pauli matrices
-        coef: (1, ), (n_op, ) or (n_op, batch), coefficient of operator
+        coef: [of shape] (1, ), (n_op, ) or (n_op, batch), coefficient of operator
         spin_idx: (n_op, n_site), indices that the Pauli operators act on
     batch_mean: bool, whether return the mean value over the batch or not
     symmetry : defined in symmetry.py, implements the symmetry operation
@@ -331,6 +345,11 @@ def compute_observable(
     pauli_num = torch.tensor(
         [[ord(c) - 88 for c in str_i] for str_i in pauli_strs]
     )  # (n_type, n_site)
+
+    # TODO: it appears the Y Pauli matrix is a phase flip and a spin flip operator.
+
+    # This generates masks for the indices acted upon by the X, Y, and Z operators.
+    # TODO: Hypothesis: the masks are used to group up the computations that can be done at the same time.
     X_sites = pauli_num == 0
     Y_sites = pauli_num == 1
     Z_sites = pauli_num == 2
