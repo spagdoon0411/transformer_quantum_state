@@ -98,13 +98,13 @@ class Hamiltonian:
             # TODO: it seems that the parts of a single observable are always in a term-in-a-linear-combination
             # relationship with the other parts, with the coefficients determining the linear combination weights.
 
-            # O := [coef1 * value1, coef2 * value2, ...]
+            # O := [coef_1 * value_1, coef_2 * value_2, ...]
 
             O = compute_observable(
                 model, samples, sample_weight, Hi, batch_mean=False, symmetry=symmetry
             )
 
-            # Sum over coefk * valuek members in O (via .sum), then add this Hamiltonian
+            # Sum over coef_k * value_k members in O (via .sum), then add this Hamiltonian
             # term's contribution to the total energy.
 
             # NOTE: compute_observable finds expected values of observables using the samples
