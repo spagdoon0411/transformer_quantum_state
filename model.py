@@ -41,16 +41,23 @@ class TransformerModel(nn.Module):
         Each row vector corresponds to a system size, where each element of the vector corresponds
         to the size of the system in a particular dimension. For instance, a 8 by 10 Ising model would
         be represented by the row vector [8, 10].
+
         param_dim: dimension of the parameter space of the Hamiltonians to be considered in training.
         embedding_size: dimension of the embedding space for the transformer model.
+
         n_head: number of attention heads in the transformer model.
-        n_hid: number of hidden units in the feedforward network of the transformer model.
+
+        n_hid: number of hidden units in the feedforward network(s) of an attention head.
+
         n_layers: number of transformer layers (where one transformer layer includes a multi-head attention
         mechanism and a feedforward network, with normalization after each and skip connections).
+
         phys_dim: dimension of the physical degrees of freedom of the system (e.g., for spin-1/2 Ising models,
         phys_dim = 2).
+
         dropout: dropout rate to use in encoding, after positional encoding is added to the linearly-transformed
         input sequence.
+
         minibatch: number of samples to process in parallel. If None, process all samples at the same time.
         """
         super(TransformerModel, self).__init__()
