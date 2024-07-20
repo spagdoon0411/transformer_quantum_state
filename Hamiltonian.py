@@ -133,6 +133,16 @@ class Hamiltonian:
         self.psi_ground = psi_ground
         return E_ground
 
+    def calc_ground(self, param=None):
+        if param is None:
+            full_Hamiltonian = self.full_H()
+        else:
+            full_Hamiltonian = self.full_H(param)
+        [E_ground, psi_ground] = eigsh(full_Hamiltonian, k=1, which="SA")
+        E_ground = E_ground[0]
+        psi_ground = psi_ground[:, 0]
+        return E_ground, psi_ground
+
     def DMRG(self):
         raise NotImplementedError
 
