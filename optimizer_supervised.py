@@ -147,7 +147,7 @@ class SupervisedOptimizer:
 
         # TODO: QUESTION: if the members of a batch were heterogenous
         # with respect to J, would the model's forward pass still be correct?
-        # HYPOTHESIS: no! After wrap_spins (in forward), the sequences are processed entirely
+        # HYPOTHESIS: yes! After wrap_spins (in forward), the sequences are processed entirely
         # in parallel. Sequences do not interact with each other--but members of the same sequence do
         # (a fundamental guarantee of batch processing)
 
