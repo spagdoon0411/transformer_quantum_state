@@ -147,6 +147,10 @@ class Hamiltonian:
         psi_ground : np.ndarray
             The ground state wave function in the Hilbert space basis
         """
+
+        # TODO: load from file if available, otherwise calculate
+        # and store. Look into PyTorch's Dataset and Sampler classes.
+
         if param is None:
             full_Hamiltonian = self.full_H()
         else:
