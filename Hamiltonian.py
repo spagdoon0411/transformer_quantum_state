@@ -248,10 +248,11 @@ class Ising(Hamiltonian):
         return self.Hamiltonian
 
     def generate_basis(self):
+        # TODO: citation?
         basis = np.zeros((2**self.n, self.n), dtype=int)
         for i in range(2**self.n):
             basis[i] = np.array([int(b) for b in np.binary_repr(i, width=self.n)])
-        return basis
+        return basis.T
 
     def DMRG(self, param=None, verbose=False, conserve=None):
         # Tenpy has S_i = 0.5 sigma_i, mine doesn't have the 0.5
