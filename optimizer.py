@@ -25,7 +25,9 @@ class Optimizer:
 
         self.Hamiltonians = Hamiltonians
 
-        # E.g., fixed J, h in [0.5, 1.5]
+        # E.g., fixed J, h in [0.5, 1.5]. If different ranges are provided across
+        # the set of Hamiltonians to train on, the first Hamiltonian's range is
+        # used.
         self.model.param_range = Hamiltonians[0].param_range
 
         # TODO: self.loss_fn is never used in this definition, but that does
