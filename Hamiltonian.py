@@ -134,6 +134,19 @@ class Hamiltonian:
         return E_ground
 
     def calc_ground(self, param=None):
+        """
+        Calculate the ground state energy and wavefunction.
+
+        Parameters:
+        param : torch.Tensor - (n_param, )
+            The parameters of the Hamiltonian in the form expected by full_H
+
+        Returns:
+        E_ground : float
+            The ground state energy
+        psi_ground : np.ndarray
+            The ground state wave function in the Hilbert space basis
+        """
         if param is None:
             full_Hamiltonian = self.full_H()
         else:
