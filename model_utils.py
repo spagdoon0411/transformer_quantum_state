@@ -228,12 +228,25 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
     log_amp, log_phase = model.forward(
         samples, compute_phase=True
     )  # (seq, batch, phys_dim)
+
+    # Ignore the last output (would be a conditional probability of an
+    # n+1th spin given the first n spins and the coupling constants, but
+    # our system only has n spins).
     log_amp = log_amp[:-1]  # (n, batch, phys_dim)
     log_phase = log_phase[:-1]  # (n, batch, phys_dim)
 
-    # LOGS of these values; summing then exponentiating is equivalent to taking the product
+    # LOGS of these values; summing then exponentiating is equivalent to taking the product.
+    # Hypothesis: this makes the calculation more compatible with a GPU.
+    # TODO: what does the indexing do? In particular, what does spin_idx do?
+    # Hypothesis: we need the conditional probability that each spin is what it is
+    # given the other spins--so we're selecting the correct conditional probabilities
+    # along the phys_dim dimension. This also begins to explain why both probability
+    # and phase calculations produce the same shape tensor.
     log_amp = log_amp[n_idx, batch_idx, spin_idx].sum(dim=0)  # (batch, )
     log_phase = log_phase[n_idx, batch_idx, spin_idx].sum(dim=0)  # (batch, )
+
+    # TODO: why do these index tensors have the shapes they do? Typically, indices in Python
+    # are one-dimensional arrays of integers or single integers.
 
     if check_duplicate:
         log_amp = log_amp[inv_idx]
@@ -242,6 +255,9 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
         log_amp = log_amp.reshape(n_symm, batch0)
         log_phase = log_phase.reshape(n_symm, batch0)
         # we are computing the phase of the first sample in the symmetry sector
+
+        # TODO: what operations are done to the phase tensor? Does it have something to
+        # do with a missing phi(J) term in the autoregressive expansion of the phase?
 
         # .angle() produces nan in certain cases, use .atan2() as a temporary workaround
         # log_phase = (phase[phase_idx] * ((log_amp + 1j * log_phase) / 2).exp().mean(dim=0)).angle() * 2  # (batch0, )

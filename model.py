@@ -72,7 +72,12 @@ class TransformerModel(nn.Module):
             system_sizes, dtype=torch.int64
         )  # (n_size, n_dim)
         assert len(self.system_sizes.shape) == 2
+
+        # Product along rows, counting all spins in the system
         self.n = self.system_sizes.prod(dim=1)  # (n_size, )
+
+        # Counts number of system configurations (n_size) and the physical dimensions
+        # of each system (n_dim).
         self.n_size, self.n_dim = self.system_sizes.shape
         max_system_size, _ = self.system_sizes.max(dim=0)  # (n_dim, )
 
@@ -150,13 +155,23 @@ class TransformerModel(nn.Module):
         self.prefix = self.init_seq()
 
     def init_seq(self):
+
+        # The sizes of the system along each dimension
         system_size = self.system_size
+
+        # Individual parameter values
         param = self.param
+
+        # Parity of the system size along each dimension
         parity = (system_size % 2).to(torch.get_default_dtype())  # (n_dim, )
+
+        # Natural logarithm of the system size along each dimension
         size_input = torch.diag(system_size.log())  # (n_dim, n_dim)
 
-        # This is the prefix, containing parameter information
+        # An empty tensor meant to hold the entire prefix (J-vector)
         init = torch.zeros(self.seq_prefix_len, 1, self.input_dim)
+
+        # TODO: sequence vs input?
 
         # sequence consists of: [log(system_size[0]) log(system_size[1]) params spins]
         # input consists of: [phys_dim_0 phys_dim_1 log(system_size[0]) log(system_size[1]) parity(system_size) mask_token params]
