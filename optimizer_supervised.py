@@ -105,11 +105,35 @@ class SupervisedOptimizer:
         )
         return loss, log_amp, log_phase, sample_weight, Er, Ei, E_var
 
-    def calculate_mse_step(self, H, batch, max_unique, use_symmetry=True):
+    def calculate_mse_step(self, H, basis_batch=None, use_symmetry=True):
         """
         Produces a computation graph for the mean squared error between the model's predictions and
         the true ground state wave function for a Hamiltonian H.
+
+        Parameters:
+
+        H: Hamiltonian
+            The Hamiltonian object that the true wave function comes from. Either produces or
+            is (via a dataset passed as an argument) associated with a (J, psi(J)) pair.
+            TODO: consider whether datasets should be associated with Hamiltonians or passed into
+            optimizers.
+
+        basis_batch: int | None
+            The maximum number of sequences to pass into the model at once. If None, will
+            attempt to use an entire basis state dataset (for example, the entire N by 2^N
+            tensor for a 1/2-spin TFIM chain)
+
+        use_symmetry: bool
+            Whether to use symmetry in the compute_psi function (from model_utils.py) to
+            produce a wave function.
+
+        Returns:
+
+        loss: torch.Tensor - (1, ) TODO: can this be a scalar?
+            The mean squared error between the model's predictions and the true wave function.
+
         """
+
         # Construct a dataset of samples. This will be a tensor of shape
         # (n, 2^n) where n is the number of spins, and will contain one of every
         # basis state in the Hilbert space. The sample_weight tensor is not needed;
@@ -222,6 +246,7 @@ class SupervisedOptimizer:
             n = self.model.system_size.prod()
             H = self.Hamiltonians[size_idx]
 
+            # TODO: replace this with a call to calculate_mse_step
             loss, log_amp, log_phase, sample_weight, Er, Ei, E_var = (
                 self.minimize_energy_step(H, batch, max_unique, use_symmetry=True)
             )
@@ -252,7 +277,7 @@ class SupervisedOptimizer:
             else:
                 optim.zero_grad()
 
-                # TODO: The loss object's computation graph is stored by
+                # NOTE: The loss object's computation graph is stored by
                 # PyTorch. Involved in its computation was the model's forward
                 # pass, and therefore the model's layers are a part of that
                 # computation graph.
