@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model_utils import sample, compute_grad
+from model_utils import sample, compute_grad, compute_psi
 from evaluation import compute_E_sample, compute_magnetization
 import autograd_hacks
 from SR import SR
@@ -139,8 +139,9 @@ class SupervisedOptimizer:
         # basis state in the Hilbert space. The sample_weight tensor is not needed;
         # compute_psi does not take one (and, considering how the authors describe how
         # to obtain a wave function given a model output, it should not need one).
+        basis = H.generate_basis()
 
-        # TODO: How could we package these into batches? This might not involve
+        # TODO: How could we package these into batches across J? This might not involve
         # fundamental changes to compute_psi, but it would involve changes to the forward pass.
         # The forward pass assumes that one batch comes from a single point in sample
         # space (using only a static J-vector).
@@ -153,15 +154,21 @@ class SupervisedOptimizer:
 
         # compute_psi from model_utils.py is used here, producing two vectors:
         # one for P(s, J) values and one for phi(s, J) values.
+        symmetry = H.symmetry if use_symmetry else None
+        log_amp, log_phase = self.model.compute_psi(basis, basis_batch, symmetry)
 
         # Use (1) - (4) from the TQS paper--most significantly, (2)--to obtain
         # the wave function that the model represents.
+        psi_predicted = torch.exp(log_amp) * torch.exp(1j * log_phase)
 
         # Obtain the ground state wave function for the Hamiltonian H, possibly memoized interally
         # in the Hamiltonian object. This is the true wave function that the model's predictions
+        # are compared against
+        psi_true = H.calc_ground(param=H.param_range[0])
 
         # Compute the mean squared error between the model's predictions and the true
         # ground state wave function.
+        loss = F.mse_loss(psi_predicted, psi_true)  # TODO: okay with complex numbers?
 
         # At this point, we should have a computational graph for the mean squared error--
         # i.e., a computational graph for a loss function--that we can backpropagate through
@@ -170,7 +177,7 @@ class SupervisedOptimizer:
         # TODO: how is the Attention Is All You Need learning rate involved? Is it a
         # global PyTorch config setting?
 
-        raise NotImplementedError("Supervised learning not implemented yet")
+        return loss
 
     # TODO: add a random sampling flag, remove param_range (should be derived from
     # the Hamiltonian),
