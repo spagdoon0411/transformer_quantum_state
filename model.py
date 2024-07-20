@@ -36,6 +36,23 @@ class TransformerModel(nn.Module):
         dropout=0.5,
         minibatch=None,
     ):
+        """
+        system_sizes: shape (n_size, n_dim) - a matrix representing sizes of systems to be considered.
+        Each row vector corresponds to a system size, where each element of the vector corresponds
+        to the size of the system in a particular dimension. For instance, a 8 by 10 Ising model would
+        be represented by the row vector [8, 10].
+        param_dim: dimension of the parameter space of the Hamiltonians to be considered in training.
+        embedding_size: dimension of the embedding space for the transformer model.
+        n_head: number of attention heads in the transformer model.
+        n_hid: number of hidden units in the feedforward network of the transformer model.
+        n_layers: number of transformer layers (where one transformer layer includes a multi-head attention
+        mechanism and a feedforward network, with normalization after each and skip connections).
+        phys_dim: dimension of the physical degrees of freedom of the system (e.g., for spin-1/2 Ising models,
+        phys_dim = 2).
+        dropout: dropout rate to use in encoding, after positional encoding is added to the linearly-transformed
+        input sequence.
+        minibatch: number of samples to process in parallel. If None, process all samples at the same time.
+        """
         super(TransformerModel, self).__init__()
         try:
             from torch.nn import TransformerEncoder
@@ -49,7 +66,7 @@ class TransformerModel(nn.Module):
         )  # (n_size, n_dim)
         assert len(self.system_sizes.shape) == 2
         self.n = self.system_sizes.prod(dim=1)  # (n_size, )
-        self.n_size, self.n_dim = self.system_sizes.shape  # For Ising, like (16, 1)
+        self.n_size, self.n_dim = self.system_sizes.shape
         max_system_size, _ = self.system_sizes.max(dim=0)  # (n_dim, )
 
         self.size_idx = None
@@ -242,11 +259,12 @@ class TransformerModel(nn.Module):
             # NOTE: slight detail: the logs of the amplitude are returned
             amp = F.log_softmax(
                 self.amp_head(psi_output), dim=-1
-            )  # (seq, batch, phys_dim)
+            )  # (n, batch, phys_dim)
+
+            result.append(amp)
 
             # Do something similar for phases, but compute the softsign function
             # instead of softmax
-            result.append(amp)
             if compute_phase:
                 phase = self.softsign(
                     self.phase_head(psi_output)
