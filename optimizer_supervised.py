@@ -193,27 +193,7 @@ class Optimizer:
 
         return loss
 
-    def produce_parameter_samples(
-        self, param_range: torch.Tensor | None, param_step: torch.Tensor | None
-    ):
-        """
-        Produces a iterable for points in parameter space to train the model on. The iterable
-        is constructed using itertools and does not perform any storage of the samples.
-
-        Parameters:
-            param_range: torch.Tensor | None - (number of parameters, 2)
-                The range of parameters to sample from. If None, the range is derived
-                from the first of the Hamiltonians.
-            param_step: torch.Tensor | None - (number of parameters, )
-                The step size to use when traversing the whole parameter space. If None,
-                the parameter space will be randomly sampled. TODO: implement random sampling,
-                perhaps from a desired distribution?
-
-        Returns:
-
-        """
-
-    def generate_parameter_range(start, end, step):
+    def generate_parameter_range(self, start, end, step):
         """
         A simple generator returning the next value in a range of values
         whenever called, according to a step size.
@@ -223,7 +203,9 @@ class Optimizer:
             yield value
             value += step
 
-    def generate_parameter_points(parameter_ranges, step_sizes, distribution=None):
+    def generate_parameter_points(
+        self, parameter_ranges, step_sizes, distribution=None
+    ):
         """
         Generate all possible combinations of parameter values for a model
         (i.e., the Cartesian product of values of parameters in a slice of parameter space)
@@ -245,7 +227,7 @@ class Optimizer:
 
         # Every possible individual parameter value for each parameter, in order
         parameter_ranges = [
-            generate_parameter_range(start.item(), end.item(), step.item())
+            self.generate_parameter_range(start.item(), end.item(), step.item())
             for (start, end), step in zip(parameter_ranges, step_sizes)
         ]
 
@@ -301,8 +283,12 @@ class Optimizer:
                 ham_start = time.time()
                 system_size = H.system_size
 
-                for point in self.generate_parameter_points(param_range, param_step):
-                    point_start = time.time()
+                points_generator = self.generate_parameter_points(
+                    param_range, param_step
+                )
+
+                for point in points_generator:
+                    # point_start = time.time()
 
                     # Set the model's parameters to the current point in parameter space. Set its
                     # size to the size of this Hamiltonian
@@ -325,14 +311,14 @@ class Optimizer:
                     # TODO: should it be called here? Or after a Hamiltonian is done? Or after
                     # an epoch (one run through all Hamiltonians) is done?
 
-                    point_end = time.time()
-                    print(
-                        f"Epoch: {i}, Loss: {loss.item()}, Point time: {point_end - point_start}s"
-                    )
+                    # point_end = time.time()
+                    # print(
+                    #     f"Epoch: {i}, Loss: {loss.item()}, Point time: {point_end - point_start}s"
+                    # )
 
                 ham_end = time.time()
                 print(
-                    f"System size: {H.system_size}, Hamiltonian time: {ham_end - ham_start}"
+                    f"System size: {H.system_size}, Hamiltonian time: {ham_end - ham_start}, Last loss: {loss.item()}"
                 )
 
             epoch_end = time.time()
