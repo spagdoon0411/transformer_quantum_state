@@ -107,7 +107,7 @@ class Optimizer:
         )
         return loss, log_amp, log_phase, sample_weight, Er, Ei, E_var
 
-    def calculate_mse_step(self, H, basis_batch=None, use_symmetry=True):
+    def calculate_mse_step(self, H, params, basis_batch=None, use_symmetry=True):
         """
         Produces a computation graph for the mean squared error between the model's predictions and
         the true ground state wave function for a Hamiltonian H.
@@ -119,6 +119,10 @@ class Optimizer:
             is (via a dataset passed as an argument) associated with a (J, psi(J)) pair.
             TODO: consider whether datasets should be associated with Hamiltonians or passed into
             optimizers.
+
+        params: torch.Tensor - (n_parameters, )
+            The parameters to set the model to, defining a point in parameter space (and thus a
+            Hamiltonian/wave function in the family that this model models)
 
         basis_batch: int | None
             The maximum number of sequences to pass into the model at once. If None, will
@@ -172,8 +176,8 @@ class Optimizer:
 
         # Obtain the ground state wave function for the Hamiltonian H, possibly memoized internally
         # in the Hamiltonian object. This is the true wave function that the model's predictions
-        # are compared against
-        energy, psi_true = H.calc_ground(param=H.param_range[0])
+        # are compared against. TODO: implement memoization in Hamiltonian objects.
+        energy, psi_true = H.calc_ground(param=params)
 
         # Compute the mean squared error between the model's predictions and the true
         # ground state wave function.
@@ -300,7 +304,7 @@ class Optimizer:
                     # cause the model to sample a random system size. See set_param in model.py.
 
                     loss = self.calculate_mse_step(
-                        H, basis_batch=None, use_symmetry=True
+                        H, param, basis_batch=None, use_symmetry=True
                     )
 
                     self.optim.zero_grad()
