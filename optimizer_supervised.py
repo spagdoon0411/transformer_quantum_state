@@ -280,6 +280,13 @@ class Optimizer:
             f"{name}_{embedding_size}_{n_head}_{n_layers}_{ensemble_id}_supervised"
         )
 
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.optim,
+            lambda step: self.lr_schedule(
+                step, self.model.embedding_size, start_step=start_iter
+            ),
+        )
+
         for i in range(epochs):
             epoch_start = time.time()
 
@@ -310,6 +317,7 @@ class Optimizer:
                     self.optim.zero_grad()
                     loss.backward()
                     self.optim.step()
+                    scheduler.step()
 
                     # TODO: after adding a schedule, be sure to call scheduler.step() here.
                     # TODO: should it be called here? Or after a Hamiltonian is done? Or after
