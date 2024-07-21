@@ -16,9 +16,10 @@ from model_utils import sample, compute_grad, compute_psi
 from evaluation import compute_E_sample, compute_magnetization
 import autograd_hacks
 from SR import SR
+import itertools
 
 
-class SupervisedOptimizer:
+class Optimizer:
     def __init__(self, model, Hamiltonians, point_of_interest=None):
         # Transformer model to optimize
         self.model = model
@@ -33,7 +34,8 @@ class SupervisedOptimizer:
         # accessed in the rest of the code (the relevant parts being main.py
         # and the train function below). VSCode's global text search tool finds
         # no other occurrences/accesses.
-        self.loss_fn = nn.MSELoss()
+        # self.loss_fn = nn.MSELoss()
+
         self.optim = torch.optim.Adam(
             self.model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9
         )
@@ -41,8 +43,8 @@ class SupervisedOptimizer:
         # the following is for per-layer stochastic reconfiguration
         # currently very unstable and performs rather poorly
         # avoid using for now, need future improvements
-        self.optim_SR = torch.optim.SGD(self.model.parameters(), lr=1.0)
-        self.preconditioner = SR(self.model)
+        # self.optim_SR = torch.optim.SGD(self.model.parameters(), lr=1.0)
+        # self.preconditioner = SR(self.model)
 
         # TODO: generate or load a dataset here--one for each Hamiltonian. (Probably
         # provide options for save/load location). Should this be one dataset per
@@ -155,189 +157,183 @@ class SupervisedOptimizer:
         # compute_psi from model_utils.py is used here, producing two vectors:
         # one for P(s, J) values and one for phi(s, J) values.
         symmetry = H.symmetry if use_symmetry else None
-        log_amp, log_phase = self.model.compute_psi(basis, basis_batch, symmetry)
+        log_amp, log_phase = compute_psi(
+            self.model, basis, symmetry, check_duplicate=True
+        )
+
+        amp = torch.exp(log_amp)
+        phase = torch.exp(1j * log_phase)
 
         # Use (1) - (4) from the TQS paper--most significantly, (2)--to obtain
-        # the wave function that the model represents.
-        psi_predicted = torch.exp(log_amp) * torch.exp(1j * log_phase)
+        # the wave function that the model represents. NOTE: the discussion about
+        # symmetries in Appendix B is accounted for if a non-None symmetry was
+        # passed to compute_psi.
+        psi_predicted = amp.mul(torch.exp(1j * phase))
 
-        # Obtain the ground state wave function for the Hamiltonian H, possibly memoized interally
+        # Obtain the ground state wave function for the Hamiltonian H, possibly memoized internally
         # in the Hamiltonian object. This is the true wave function that the model's predictions
         # are compared against
-        psi_true = H.calc_ground(param=H.param_range[0])
+        energy, psi_true = H.calc_ground(param=H.param_range[0])
 
         # Compute the mean squared error between the model's predictions and the true
         # ground state wave function.
-        loss = F.mse_loss(psi_predicted, psi_true)  # TODO: okay with complex numbers?
+        psi_predicted_real_imag = torch.view_as_real(psi_predicted)
+        psi_true_real_imag = torch.view_as_real(psi_true.to(torch.complex64))
+
+        loss = F.mse_loss(
+            psi_predicted_real_imag, psi_true_real_imag
+        )  # TODO: better way to account for only a phase difference?
 
         # At this point, we should have a computational graph for the mean squared error--
         # i.e., a computational graph for a loss function--that we can backpropagate through
-        # using .backward(). This will adjust the model's parameters.
+        # using .backward() and .step(). This will adjust the model's parameters.
         #
         # TODO: how is the Attention Is All You Need learning rate involved? Is it a
         # global PyTorch config setting?
 
         return loss
 
-    # TODO: add a random sampling flag, remove param_range (should be derived from
-    # the Hamiltonian),
+    def produce_parameter_samples(
+        self, param_range: torch.Tensor | None, param_step: torch.Tensor | None
+    ):
+        """
+        Produces a iterable for points in parameter space to train the model on. The iterable
+        is constructed using itertools and does not perform any storage of the samples.
+
+        Parameters:
+            param_range: torch.Tensor | None - (number of parameters, 2)
+                The range of parameters to sample from. If None, the range is derived
+                from the first of the Hamiltonians.
+            param_step: torch.Tensor | None - (number of parameters, )
+                The step size to use when traversing the whole parameter space. If None,
+                the parameter space will be randomly sampled. TODO: implement random sampling,
+                perhaps from a desired distribution?
+
+        Returns:
+
+        """
+
+    def generate_parameter_range(start, end, step):
+        """
+        A simple generator returning the next value in a range of values
+        whenever called, according to a step size.
+        """
+        value = start
+        while value < end:
+            yield value
+            value += step
+
+    def generate_parameter_points(parameter_ranges, step_sizes, distribution=None):
+        """
+        Generate all possible combinations of parameter values for a model
+        (i.e., the Cartesian product of values of parameters in a slice of parameter space)
+
+        Parameters:
+            parameter_ranges: torch.Tensor of shape (n_parameters, 2)
+                The starting and ending values for each dimension of the slice of parameter space
+            step_sizes: torch.Tensor of shape (n_parameters,)
+                The step size for each dimension of the slice of parameter space
+            distribution: N/A
+                TODO: Not implemented
+
+        """
+
+        if distribution is not None:
+            raise NotImplementedError(
+                "Sampling using a custom distribution is not implemented yet."
+            )
+
+        # Every possible individual parameter value for each parameter, in order
+        parameter_ranges = [
+            generate_parameter_range(start.item(), end.item(), step.item())
+            for (start, end), step in zip(parameter_ranges, step_sizes)
+        ]
+
+        return itertools.product(*parameter_ranges)
+
     def train(
         self,
-        n_iter,
-        batch=10000,
-        max_unique=1000,
+        epochs,
         param_range=None,
-        fine_tuning=False,
-        use_SR=True,
+        param_step=None,
         ensemble_id=0,
         start_iter=None,
     ):
+        """
+        Trains the model to replicate the parameter-and-spin-sequence to ground
+        state wave function mapping using the Hamiltonians to produce the ground
+        state labels and MSE to minimize error.
+
+        Parameters:
+            epochs: int
+                Number of times the optimizer will iterate over all of the Hamiltonians
+                provided to it on initialization.
+            param_range: torch.Tensor | None - (number of parameters, 2)
+                The range of parameters to sample from. If None, the range is derived
+                from the first of the Hamiltonians.
+            param_step: torch.Tensor | None - (number of parameters, )
+                The step size to use when traversing the whole parameter space. If None,
+                the parameter space will be randomly sampled. TODO: implement random sampling,
+                perhaps from a desired distribution?
+            ensemble_id: int
+            start_iter: int | None
+        """
+
         name, embedding_size, n_head, n_layers = (
             type(self.Hamiltonians[0]).__name__,
             self.model.embedding_size,
             self.model.n_head,
             self.model.n_layers,
         )
-        if start_iter is None:
-            start_iter = 0 if not fine_tuning else 100000
-        system_sizes = self.model.system_sizes
-        n_iter += 1
+
         if param_range is None:
             param_range = self.Hamiltonians[0].param_range
         self.model.param_range = param_range
+
         save_str = (
-            f"{name}_{embedding_size}_{n_head}_{n_layers}_{ensemble_id}"
-            if not fine_tuning
-            else f"ft_{self.model.system_sizes[0].detach().cpu().numpy().item()}_"
-            f"{param_range[0].detach().cpu().numpy().item():.2f}_"
-            f"{name}_{embedding_size}_{n_head}_{n_layers}_{ensemble_id}"
+            f"{name}_{embedding_size}_{n_head}_{n_layers}_{ensemble_id}_supervised"
         )
 
-        if use_SR:
-            optim = self.optim_SR
-            autograd_hacks.add_hooks(self.model)
-        else:
-            optim = self.optim
-        scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optim,
-            lambda step: self.lr_schedule(
-                step, self.model.embedding_size, start_step=start_iter
-            ),
-        )
+        for i in range(epochs):
+            epoch_start = time.time()
 
-        if self.point_of_interest is not None:
-            size_i, param_i = self.point_of_interest
-            H_watch = type(self.Hamiltonians[0])(size_i, self.Hamiltonians[0].periodic)
-            if self.Hamiltonians[0].symmetry is None:
-                H_watch.symmetry = None
-            E_watch = np.zeros(int(np.ceil(n_iter / self.save_freq)))
-            m_watch = np.zeros((int(np.ceil(n_iter / self.save_freq)), 3))
-            idx = 0
+            for H in self.Hamiltonians:
+                ham_start = time.time()
+                system_size = H.system_size
 
-        E_curve = np.zeros(n_iter)
-        E_vars = np.zeros(n_iter)
+                for point in self.generate_parameter_points(param_range, param_step):
+                    point_start = time.time()
 
-        # TODO: this should probaly be changed to epochs, to be clearer that were iterating
-        # over the whole dataset? Or we could keep this as "iterations," where one iteration is
-        # a minibatch update?
-        for i in range(start_iter, start_iter + n_iter):
-            start = time.time()
+                    # Set the model's parameters to the current point in parameter space. Set its
+                    # size to the size of this Hamiltonian
+                    param = torch.tensor(point)
+                    self.model.set_param(system_size=system_size, param=param)
 
-            # TODO: should we allow random sampling from parameter space? Datasets
-            # from the Hamiltonians could be internally memoized or pre-loaded
+                    # NOTE: the system size is constant for this inner loop but must be reset
+                    # here because leaving it out (or, equivalently, setting it to None) would
+                    # cause the model to sample a random system size. See set_param in model.py.
 
-            # TODO: set particular parameters for the model here. Note that no arguments -> random
-            # sampling from the parameter range.
-            self.model.set_param()
-            size_idx = self.model.size_idx
-            n = self.model.system_size.prod()
-            H = self.Hamiltonians[size_idx]
+                    loss = self.calculate_mse_step(
+                        H, basis_batch=None, use_symmetry=True
+                    )
 
-            # TODO: replace this with a call to calculate_mse_step
-            loss, log_amp, log_phase, sample_weight, Er, Ei, E_var = (
-                self.minimize_energy_step(H, batch, max_unique, use_symmetry=True)
-            )
+                    self.optim.zero_grad()
+                    loss.backward()
+                    self.optim.step()
 
-            t1 = time.time()
+                    # TODO: after adding a schedule, be sure to call scheduler.step() here.
+                    # TODO: should it be called here? Or after a Hamiltonian is done? Or after
+                    # an epoch (one run through all Hamiltonians) is done?
 
-            if use_SR:
-                autograd_hacks.clear_backprops(self.model)
-                optim.zero_grad()
-                log_amp.sum().backward(retain_graph=True)
-                autograd_hacks.compute_grad1(
-                    self.model, loss_type="sum", grad_name="grad1"
+                    point_end = time.time()
+                    print(
+                        f"Epoch: {i}, Loss: {loss.item()}, Point time: {point_end - point_start}s"
+                    )
+
+                ham_end = time.time()
+                print(
+                    f"System size: {H.system_size}, Hamiltonian time: {ham_end - ham_start}"
                 )
-                autograd_hacks.clear_backprops(self.model)
 
-                optim.zero_grad()
-                log_phase.sum().backward(retain_graph=True)
-                autograd_hacks.compute_grad1(
-                    self.model, loss_type="sum", grad_name="grad2"
-                )
-                autograd_hacks.clear_backprops(self.model)
-
-                optim.zero_grad()
-                loss.backward()
-                autograd_hacks.clear_backprops(self.model)
-                self.preconditioner.step(sample_weight)
-                optim.step()
-            else:
-                optim.zero_grad()
-
-                # NOTE: The loss object's computation graph is stored by
-                # PyTorch. Involved in its computation was the model's forward
-                # pass, and therefore the model's layers are a part of that
-                # computation graph.
-                #
-                # Therefore, it makes sense that loss.backward() would perform
-                # both reverse-mode automatic differentiation and, where it
-                # encounters registered model parameters, adustments via backpropagation
-                # (a simple adaptation from reverse-mode AD).
-                loss.backward()
-                optim.step()
-
-            scheduler.step()
-            t2 = time.time()
-
-            # NOTE: everything below this point is just for logging and saving. Is an
-            # example of how separation of concerns could be improved in the codebase
-            # (e.g., by moving this to a separate function).
-
-            print_str = f"E_real = {Er:.6f}\t E_imag = {Ei:.6f}\t E_var = {E_var:.6f}\t"
-            E_curve[i - start_iter] = Er
-            E_vars[i - start_iter] = E_var
-
-            end = time.time()
-            print(
-                f"i = {i}\t {print_str} n = {n}\t lr = {scheduler.get_lr()[0]:.4e} t = {(end-start):.6f}  t_optim = {t2-t1:.6f}"
-            )
-            if i % self.save_freq == 0:
-                with open(f"results/E_{save_str}.npy", "wb") as f:
-                    np.save(f, E_curve)
-                with open(f"results/E_var_{save_str}.npy", "wb") as f:
-                    np.save(f, E_vars)
-                if self.point_of_interest is not None:
-                    E_watch[idx] = (
-                        compute_E_sample(self.model, size_i, param_i, H_watch)
-                        .real.detach()
-                        .cpu()
-                        .numpy()
-                    )
-                    m_watch[idx, :] = (
-                        compute_magnetization(
-                            self.model, size_i, param_i, symmetry=H_watch.symmetry
-                        )
-                        .real.detach()
-                        .cpu()
-                        .numpy()
-                    )
-                    idx += 1
-                    with open(f"results/E_watch_{save_str}.npy", "wb") as f:
-                        np.save(f, E_watch)
-                    with open(f"results/m_watch_{save_str}.npy", "wb") as f:
-                        np.save(f, m_watch)
-                torch.save(self.model.state_dict(), f"results/model_{save_str}.ckpt")
-                if i % self.ckpt_freq == 0:
-                    torch.save(
-                        self.model.state_dict(), f"results/ckpt_{i}_{save_str}.ckpt"
-                    )
+            epoch_end = time.time()
+            print(f"Epoch time: {epoch_end - epoch_start}")
