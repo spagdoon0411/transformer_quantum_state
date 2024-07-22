@@ -133,6 +133,60 @@ class Hamiltonian:
         self.psi_ground = psi_ground
         return E_ground
 
+    def memoize(
+        self, param_range: torch.Tensor, param_step: torch.Tensor, directory: str
+    ):
+        """
+        Precalculate ground state energies and wavefunctions for a range of parameters at
+        intervals specified by param_step. Save the result to a file with an automatically-generated
+        name (based on the Hamiltonian type, system size, parameter ranges, and parameter step sizes).
+        Will load files that match the specified parameters if they exist or will create them.
+
+        Parameters:
+        param_range : torch.Tensor - (n_param, 2)
+            The range of parameters to memoize (vertically-organized, with the first column
+            being the lower bounds and the second column being the upper bounds)
+        param_step : torch.Tensor - (n_param, )
+            The step sizes of the parameters to memoize, aligned with param_range's vertical dimension
+        directory : str
+            The path to the directory where the memoized datasets will be stored
+
+        Returns: None
+        """
+        raise NotImplementedError("Memoization of datasets is not implemented yet.")
+
+    def retrieve_memoized_ground_states(
+        self,
+        param_range: torch.Tensor,
+        param_step: torch.Tensor,
+        directory: str,
+        as_dataframe: bool = True,
+    ):
+        """
+        Load memoized ground state energies and wavefunctions from a file using its automatically
+        generated name as an identifier. See memoize.
+
+        Parameters:
+        param_range : torch.Tensor - (n_param, 2)
+            The range of parameters used in the memoization (vertically-organized, with the first column
+            being the lower bounds and the second column being the upper bounds)
+        param_step : torch.Tensor - (n_param, )
+            The step sizes of the parameters used in the memoization, aligned with param_range's vertical
+            dimension
+        directory : str
+            The path to the directory where the memoized datasets are stored
+        as_dataframe : bool
+            Whether to return the loaded data as a pandas DataFrame (True) or as a PyTorch dataset (False)
+
+        Returns:
+        dataset : pandas.DataFrame or torch.utils.data.Dataset
+            The memoized dataset, either as a DataFrame or as a PyTorch dataset
+        """
+
+        raise NotImplementedError(
+            "Retrieval of memoized datasets is not implemented yet."
+        )
+
     def calc_ground(self, param=None):
         """
         Calculate the ground state energy and wavefunction.
