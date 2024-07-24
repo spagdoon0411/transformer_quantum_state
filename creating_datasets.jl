@@ -3,6 +3,7 @@ using SparseArrays
 using Profile
 using PProf
 using ArnoldiMethod
+using LinearAlgebra
 
 ⊗(x, y) = kron(x, y)
 
@@ -27,7 +28,7 @@ function TransverseFieldIsing_sparse_threaded_base(; N::Int64)
     H2 = spzeros(Int, 2^N, 2^N)
 
     Threads.@threads for i in 1:N
-        this_thread_first_term_ops = circshift(first_term_ops, i - 1)
+        this_thread_first_term_ops = circshift(first_term_ops, i)
         term = foldl(⊗, this_thread_first_term_ops)
         lock(l)
         try
@@ -38,7 +39,7 @@ function TransverseFieldIsing_sparse_threaded_base(; N::Int64)
     end
 
     Threads.@threads for i in 1:N
-        this_thread_second_term_ops = circshift(second_term_ops, i - 1)
+        this_thread_second_term_ops = circshift(second_term_ops, i)
         term = foldl(⊗, this_thread_second_term_ops)
         lock(l)
         try
@@ -55,7 +56,7 @@ end
 # by performing a linear combination of the two terms
 # TODO: does type conversion from Int64 to Float64 have overhead?
 @inline 
-function specialize_H_threaded(H1::SparseMatrixCSC{Float64}, H2::SparseMatrixCSC{Float64}, h::Float64)
+function specialize_H_threaded(H1::SparseMatrixCSC{Float64, Int64}, H2::SparseMatrixCSC{Float64, Int64}, h::Float64)
     H1 + h * H2 # TODO: is this operation optimized by Julia via OpenBLAS?
 end
 
@@ -119,7 +120,6 @@ function TransverseFieldIsing_sparse_threaded(; N, h)
     H
 end
 
-
 function ground_state(H)
     decomposition, history = partialschur(H, nev=1, which=:SR)
     energies, states = partialeigen(decomposition)
@@ -150,12 +150,33 @@ end
 # Profile.print()
 # pprof()
 
-precompile(TransverseFieldIsing_sparse_threaded_base, (Int,))
-precompile(specialize_H_threaded, (SparseMatrixCSC{Float64, Int64}, SparseMatrixCSC{Float64, Int64}, Float64))
+# precompile(TransverseFieldIsing_sparse_threaded_base, (Int,))
+# precompile(specialize_H_threaded, (SparseMatrixCSC{Float64, Int64}, SparseMatrixCSC{Float64, Int64}, Float64))
 
-Threads.@threads for N in 4:1:20
+N_test = 10
+h_test = 0 
+H8 = TransverseFieldIsing_sparse(N=N_test, h=h_test)
+energy_true, state_true = ground_state(H8)
+energy_predicted, state_predicted = nothing, nothing
+
+for N in 4:1:20 # TODO: allocate threads more explicitly
     @time H1, H2 = TransverseFieldIsing_sparse_threaded_base(N=N)
-    for h in 0.1:0.1:4.0
-        @time ground_state(specialize_H_threaded(H1, H2, h))
+    for h in (h_test):0.1:(h_test + 1)
+            @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
+            H8_mine = specialize_H_threaded(H1, H2, h)
+            # H8_mine = TransverseFieldIsing_sparse(N=N, h=h)
+            energy, state = ground_state(H8_mine)
+            if (N == N_test) && (h == h_test)
+                @assert H8 ≈ H8_mine
+                println("N = $N, h = $h")
+                println("Energy: $energy")
+                println("True energy: $energy_true")
+                # println("State: $state")
+                # println("True state: $state_true")
+                println("Sum of state diffs:" * string(norm(state - state_true)))
+                @assert abs.(state_true) ≈ abs.(state)
+                @assert abs(energy_true - energy) < 1e-10
+            end
+        end 
     end
 end
