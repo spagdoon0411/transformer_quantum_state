@@ -71,9 +71,9 @@ end
 
 h_min = 0.5
 h_max = 1.5
-h_step = 0.1
+h_step = 0.01
 N_min = 2
-N_max = 10
+N_max = 20
 N_step = 1
 Nrange = N_min:N_step:N_max
 hrange = h_min:h_step:h_max
