@@ -274,6 +274,9 @@ class Ising(Hamiltonian):
             (["X"], [self.h], self.external_field),
         ]
 
+        self.basis = self.get_basis()
+        self.basis = self.basis.to("cuda")
+
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
         self.symmetry = Symmetry1D(self.n)
@@ -320,7 +323,7 @@ class Ising(Hamiltonian):
             self.Hamiltonian = self.Hamiltonian + h * hX
         return self.Hamiltonian
 
-    def generate_basis(self):
+    def get_basis(self):
         # TODO: citation?
         basis = np.zeros((2**self.n, self.n), dtype=int)
         for i in range(2**self.n):
@@ -400,6 +403,9 @@ class Ising(Hamiltonian):
         - state - a list of floats
 
         Sets this Hamiltonian's self.dataset attribute to the loaded dataset.
+
+        Precomputes a binary representation of the system's states as a PyTorch tensor
+        for passing into the model. This is stored in self.basis.
 
         Produces a warning if the range of h values in the metadata file does not
         match the range of h values in the Hamiltonian's param_range attribute.
