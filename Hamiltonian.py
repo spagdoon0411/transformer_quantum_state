@@ -9,6 +9,9 @@ import os
 import numpy as np
 import pyarrow as pa
 import pandas as pd
+import json
+import math
+import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 import torch
@@ -216,7 +219,7 @@ class Hamiltonian:
         E_ground = E_ground[0]
         psi_ground = psi_ground[:, 0]
         return E_ground, torch.tensor(psi_ground)
-    
+
     def retrieve_ground(self, param, system_size):
         raise NotImplementedError("Override retrieve_ground in the child class")
 
@@ -243,9 +246,10 @@ class Hamiltonian:
         for i in trange(n_measure):
             samples[i], _ = psi.sample_measurements(norm_tol=1e-4)
         return samples
-    
+
     def load_dataset(self):
         raise NotImplementedError("Override load_dataset in the child class")
+
 
 class Ising(Hamiltonian):
     def __init__(self, system_size, periodic=True):
@@ -281,6 +285,9 @@ class Ising(Hamiltonian):
         # self.symmetry.add_symmetry('translation', self.momentum)
         # self.symmetry.add_symmetry('reflection', self.parity)
         # self.symmetry.add_symmetry('spin_inversion', self.Z2)
+
+        self.h_step = None
+        self.dataset = None
 
     def update_param(self, param):
         # param: (1, )
@@ -384,9 +391,9 @@ class Ising(Hamiltonian):
         - file_names - a list of strings
 
         Loads the file corresponding to this Hamiltonian's system size
-        (self.n)--i.e., searches in the list to determine the index of the 
+        (self.n)--i.e., searches in the list to determine the index of the
         system size in the N_list, then loads the corresponding file at that index
-        in the file_names list as a Pandas DataFrame. Expects the file to be in 
+        in the file_names list as a Pandas DataFrame. Expects the file to be in
         the Arrow IPC (Feather2) format and expects the table to contain the columns:
         - N - an int
         - h - a float
@@ -395,11 +402,11 @@ class Ising(Hamiltonian):
         Sets this Hamiltonian's self.dataset attribute to the loaded dataset.
 
         Produces a warning if the range of h values in the metadata file does not
-        match the range of h values in the Hamiltonian's param_range attribute. 
+        match the range of h values in the Hamiltonian's param_range attribute.
 
         Notes a self.h_step corresponding to the step size in the metadata file.
 
-        TODO: for large datsets, consider using PyArrow's memory mapping or Dask 
+        TODO: for large datsets, consider using PyArrow's memory mapping or Dask
         DataFrames.
 
         TODO: make parameter ranges more consistent across Hamiltonians.
@@ -407,17 +414,18 @@ class Ising(Hamiltonian):
         Parameters:
         data_dir_path: str
             The path to the directory containing the meta.json file
-        
-        Returns: 
+
+        Returns:
         None
         """
 
         # Load the metadata file
         metadata_path = os.path.join(data_dir_path, "meta.json")
-        metadata = pd.read_json(metadata_path)
+        metadata_file = open(metadata_path, "r")
+        metadata = json.load(metadata_file)
 
         try:
-            idx = metadata["file_names"]["N_list"].index(self.n)    
+            idx = metadata["N_list"].index(self.n)
         except ValueError:
             raise ValueError(f"System size {self.n} not found in metadata file")
 
@@ -432,46 +440,58 @@ class Ising(Hamiltonian):
         this_h_max = self.param_range[1].item()
         h_step = metadata["h_step"]
 
-        if h_min != self.param_range[0].item() or h_max != self.param_range[1].item() or h_step != 0.1:
-            warning = "Warning: h values in metadata file do not match Hamiltonian's param_range; "
-            + f"found h_min={h_min}, h_max={h_max}, h_step={h_step}, expected " 
-            + f"h_min={this_h_min}, h_max={this_h_max}. Setting param_range to match."
+        if h_min != self.param_range[0].item() or h_max != self.param_range[1].item():
+            warning = """Warning: h values in metadata file do not match Hamiltonian's param_range; \
+found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting param_range to match.""".format(
+                h_min, h_max, h_step, this_h_min, this_h_max
+            )
 
             self.param_range = torch.tensor([[h_min], [h_max]])
 
             print(warning)
-        
+
         self.h_step = h_step
 
-    def retrieve_ground(self, param_index):
+    def retrieve_ground(self, param, abs_tol=1e-5):
         """
         Given a parameter value and system size, retrieves the ground state as a PyTorch tensor--
         possibly for use in supervised training.
 
         Parameters:
         param : float
-            An index corresponding to the value of h in the range of the dataset/Hamiltonian.
-            The formula for the index as a function of h is (h - h_min) / h_step, where h_min 
-            is the minimum value of h. NOTE: indices are used instead of floats to prevent false 
-            negatives in searching for the state in the dataset due to floating point errors.
+            The h-value to retrieve the ground state for. Must be in the range of the dataset.
+            NOTE: due to the way the dataset is constructed, floating point errors may cause
+            problems with parameter-based indexing here. np.isclose is used with a default
+            absolute tolerance of 1e-5 to mitigate this.
+        abs_tol : float
+            1e-5 by default. The absolute tolerance used in np.isclose to determine if an
+            input parameter value is close enough to a parameter value in the dataset to be
+            considered a match.
 
         Returns:
-        ground_state : torch.Tensor
+        energy: float
+            The ground state energy
+        state: torch.Tensor
             The ground state wavefunction as a PyTorch tensor of shape (2**n, )
         """
 
         if self.dataset is None:
             raise ValueError("Ground states not loaded yet. See load_dataset.")
 
-        # Find the row corresponding to the parameter value
-        h_matches = self.dataset[self.dataset["h"] == param_index]
-        if h_matches.empty():
-            raise ValueError(f"No ground state found for h={param_index}")
+        # Find the rows close to the parameter value (within abs_tol)
+        h_matches = self.dataset[np.isclose(self.dataset["h"], param, atol=abs_tol)]
+        if h_matches.empty:
+            raise ValueError(f"No ground state found for h={param}")
         elif len(h_matches) > 1:
-            raise ValueError(f"Multiple ground states found for h={param_index}; using the first.")
+            raise ValueError(
+                f"Multiple ground states found for h={param}; using the first."
+            )
 
-        energy, state = h_matches[[""]]
-        return ground_state
+        # Pick the first one to return
+        h_match = h_matches.iloc[0]
+        energy, state = h_match["energy"], h_match["state"]
+        state = torch.tensor(state)
+        return energy, state
 
     # def DMRG(self, param=None, verbose=False):
     #     # Adapted from tenpy examples
