@@ -7,6 +7,8 @@ Created on Sun May 15 14:15:05 2022
 
 import os
 import numpy as np
+import pyarrow as pa
+import pandas as pd
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 import torch
@@ -57,6 +59,7 @@ class Hamiltonian:
         self.H = None
         self.symmetry = None
         self.n_dim = None
+        self.dataset = None
 
     def update_param(self, param):
         """
@@ -133,59 +136,59 @@ class Hamiltonian:
         self.psi_ground = psi_ground
         return E_ground
 
-    def memoize(
-        self, param_range: torch.Tensor, param_step: torch.Tensor, directory: str
-    ):
-        """
-        Precalculate ground state energies and wavefunctions for a range of parameters at
-        intervals specified by param_step. Save the result to a file with an automatically-generated
-        name (based on the Hamiltonian type, system size, parameter ranges, and parameter step sizes).
-        Will load files that match the specified parameters if they exist or will create them.
+    # def memoize(
+    #     self, param_range: torch.Tensor, param_step: torch.Tensor, directory: str
+    # ):
+    #     """
+    #     Precalculate ground state energies and wavefunctions for a range of parameters at
+    #     intervals specified by param_step. Save the result to a file with an automatically-generated
+    #     name (based on the Hamiltonian type, system size, parameter ranges, and parameter step sizes).
+    #     Will load files that match the specified parameters if they exist or will create them.
 
-        Parameters:
-        param_range : torch.Tensor - (n_param, 2)
-            The range of parameters to memoize (vertically-organized, with the first column
-            being the lower bounds and the second column being the upper bounds)
-        param_step : torch.Tensor - (n_param, )
-            The step sizes of the parameters to memoize, aligned with param_range's vertical dimension
-        directory : str
-            The path to the directory where the memoized datasets will be stored
+    #     Parameters:
+    #     param_range : torch.Tensor - (n_param, 2)
+    #         The range of parameters to memoize (vertically-organized, with the first column
+    #         being the lower bounds and the second column being the upper bounds)
+    #     param_step : torch.Tensor - (n_param, )
+    #         The step sizes of the parameters to memoize, aligned with param_range's vertical dimension
+    #     directory : str
+    #         The path to the directory where the memoized datasets will be stored
 
-        Returns: None
-        """
-        raise NotImplementedError("Memoization of datasets is not implemented yet.")
+    #     Returns: None
+    #     """
+    #     raise NotImplementedError("Memoization of datasets is not implemented yet.")
 
-    def retrieve_memoized_ground_states(
-        self,
-        param_range: torch.Tensor,
-        param_step: torch.Tensor,
-        directory: str,
-        as_dataframe: bool = True,
-    ):
-        """
-        Load memoized ground state energies and wavefunctions from a file using its automatically
-        generated name as an identifier. See memoize.
+    # def retrieve_ground_states(
+    #     self,
+    #     param_range: torch.Tensor,
+    #     param_step: torch.Tensor,
+    #     directory: str,
+    #     as_dataframe: bool = True,
+    # ):
+    #     """
+    #     Load memoized ground state energies and wavefunctions from a file using its automatically
+    #     generated name as an identifier. See memoize.
 
-        Parameters:
-        param_range : torch.Tensor - (n_param, 2)
-            The range of parameters used in the memoization (vertically-organized, with the first column
-            being the lower bounds and the second column being the upper bounds)
-        param_step : torch.Tensor - (n_param, )
-            The step sizes of the parameters used in the memoization, aligned with param_range's vertical
-            dimension
-        directory : str
-            The path to the directory where the memoized datasets are stored
-        as_dataframe : bool
-            Whether to return the loaded data as a pandas DataFrame (True) or as a PyTorch dataset (False)
+    #     Parameters:
+    #     param_range : torch.Tensor - (n_param, 2)
+    #         The range of parameters used in the memoization (vertically-organized, with the first column
+    #         being the lower bounds and the second column being the upper bounds)
+    #     param_step : torch.Tensor - (n_param, )
+    #         The step sizes of the parameters used in the memoization, aligned with param_range's vertical
+    #         dimension
+    #     directory : str
+    #         The path to the directory where the memoized datasets are stored
+    #     as_dataframe : bool
+    #         Whether to return the loaded data as a pandas DataFrame (True) or as a PyTorch dataset (False)
 
-        Returns:
-        dataset : pandas.DataFrame or torch.utils.data.Dataset
-            The memoized dataset, either as a DataFrame or as a PyTorch dataset
-        """
+    #     Returns:
+    #     dataset : pandas.DataFrame or torch.utils.data.Dataset
+    #         The memoized dataset, either as a DataFrame or as a PyTorch dataset
+    #     """
 
-        raise NotImplementedError(
-            "Retrieval of memoized datasets is not implemented yet."
-        )
+    #     raise NotImplementedError(
+    #         "Retrieval of memoized datasets is not implemented yet."
+    #     )
 
     def calc_ground(self, param=None):
         """
@@ -213,6 +216,9 @@ class Hamiltonian:
         E_ground = E_ground[0]
         psi_ground = psi_ground[:, 0]
         return E_ground, torch.tensor(psi_ground)
+    
+    def retrieve_ground(self, param, system_size):
+        raise NotImplementedError("Override retrieve_ground in the child class")
 
     def DMRG(self):
         raise NotImplementedError
@@ -237,7 +243,9 @@ class Hamiltonian:
         for i in trange(n_measure):
             samples[i], _ = psi.sample_measurements(norm_tol=1e-4)
         return samples
-
+    
+    def load_dataset(self):
+        raise NotImplementedError("Override load_dataset in the child class")
 
 class Ising(Hamiltonian):
     def __init__(self, system_size, periodic=True):
@@ -364,6 +372,106 @@ class Ising(Hamiltonian):
                 )
             )
         return E * 4, psi, M
+
+    def load_dataset(self, data_dir_path: str):
+        """
+        Given a directory path, searches for a file in the directory called
+        meta.json. Expects the meta.json file to contain the keys:
+        - h_min - a float
+        - h_max - a float
+        - h_step - a float
+        - N_list - a list of ints
+        - file_names - a list of strings
+
+        Loads the file corresponding to this Hamiltonian's system size
+        (self.n)--i.e., searches in the list to determine the index of the 
+        system size in the N_list, then loads the corresponding file at that index
+        in the file_names list as a Pandas DataFrame. Expects the file to be in 
+        the Arrow IPC (Feather2) format and expects the table to contain the columns:
+        - N - an int
+        - h - a float
+        - state - a list of floats
+
+        Sets this Hamiltonian's self.dataset attribute to the loaded dataset.
+
+        Produces a warning if the range of h values in the metadata file does not
+        match the range of h values in the Hamiltonian's param_range attribute. 
+
+        Notes a self.h_step corresponding to the step size in the metadata file.
+
+        TODO: for large datsets, consider using PyArrow's memory mapping or Dask 
+        DataFrames.
+
+        TODO: make parameter ranges more consistent across Hamiltonians.
+
+        Parameters:
+        data_dir_path: str
+            The path to the directory containing the meta.json file
+        
+        Returns: 
+        None
+        """
+
+        # Load the metadata file
+        metadata_path = os.path.join(data_dir_path, "meta.json")
+        metadata = pd.read_json(metadata_path)
+
+        try:
+            idx = metadata["file_names"]["N_list"].index(self.n)    
+        except ValueError:
+            raise ValueError(f"System size {self.n} not found in metadata file")
+
+        file_path = metadata["file_names"][idx]
+        mmap = pa.memory_map(file_path)
+        with mmap as source:
+            self.dataset = pa.ipc.open_file(source).read_pandas()
+
+        h_min = metadata["h_min"]
+        this_h_min = self.param_range[0].item()
+        h_max = metadata["h_max"]
+        this_h_max = self.param_range[1].item()
+        h_step = metadata["h_step"]
+
+        if h_min != self.param_range[0].item() or h_max != self.param_range[1].item() or h_step != 0.1:
+            warning = "Warning: h values in metadata file do not match Hamiltonian's param_range; "
+            + f"found h_min={h_min}, h_max={h_max}, h_step={h_step}, expected " 
+            + f"h_min={this_h_min}, h_max={this_h_max}. Setting param_range to match."
+
+            self.param_range = torch.tensor([[h_min], [h_max]])
+
+            print(warning)
+        
+        self.h_step = h_step
+
+    def retrieve_ground(self, param_index):
+        """
+        Given a parameter value and system size, retrieves the ground state as a PyTorch tensor--
+        possibly for use in supervised training.
+
+        Parameters:
+        param : float
+            An index corresponding to the value of h in the range of the dataset/Hamiltonian.
+            The formula for the index as a function of h is (h - h_min) / h_step, where h_min 
+            is the minimum value of h. NOTE: indices are used instead of floats to prevent false 
+            negatives in searching for the state in the dataset due to floating point errors.
+
+        Returns:
+        ground_state : torch.Tensor
+            The ground state wavefunction as a PyTorch tensor of shape (2**n, )
+        """
+
+        if self.dataset is None:
+            raise ValueError("Ground states not loaded yet. See load_dataset.")
+
+        # Find the row corresponding to the parameter value
+        h_matches = self.dataset[self.dataset["h"] == param_index]
+        if h_matches.empty():
+            raise ValueError(f"No ground state found for h={param_index}")
+        elif len(h_matches) > 1:
+            raise ValueError(f"Multiple ground states found for h={param_index}; using the first.")
+
+        energy, state = h_matches[[""]]
+        return ground_state
 
     # def DMRG(self, param=None, verbose=False):
     #     # Adapted from tenpy examples
