@@ -109,12 +109,12 @@ for N in Nrange # TODO: allocate threads more explicitly
     global N_index += 1
 end
 
+N_list = collect(Nrange)
+
 meta_path = joinpath(table_dir, "meta.json")
 meta_file = open(meta_path, "w")
 meta = Dict(
-    "N_min" => N_min,
-    "N_max" => N_max,
-    "N_step" => N_step,
+    "N_list" => N_list,
     "h_min" => h_min,
     "h_max" => h_max,
     "h_step" => h_step,
