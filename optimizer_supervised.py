@@ -177,7 +177,7 @@ class Optimizer:
         # Obtain the ground state wave function for the Hamiltonian H, possibly memoized internally
         # in the Hamiltonian object. This is the true wave function that the model's predictions
         # are compared against. TODO: implement memoization in Hamiltonian objects.
-        energy, psi_true = H.calc_ground(param=params)
+        energy, psi_true = H.retrieve_ground(param=params)
 
         # Compute the mean squared error between the model's predictions and the true
         # ground state wave function.
