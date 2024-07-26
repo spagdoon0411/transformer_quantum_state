@@ -145,7 +145,7 @@ class Optimizer:
         # basis state in the Hilbert space. The sample_weight tensor is not needed;
         # compute_psi does not take one (and, considering how the authors describe how
         # to obtain a wave function given a model output, it should not need one).
-        basis = H.generate_basis()
+        basis = H.basis
 
         # TODO: How could we package these into batches across J? This might not involve
         # fundamental changes to compute_psi, but it would involve changes to the forward pass.
@@ -303,21 +303,28 @@ class Optimizer:
 
                     # Set the model's parameters to the current point in parameter space. Set its
                     # size to the size of this Hamiltonian
-                    param = torch.tensor(point)
+                    param = torch.tensor(point, device="cpu")
                     self.model.set_param(system_size=system_size, param=param)
+
+                    loss = torch.tensor([-1])
 
                     # NOTE: the system size is constant for this inner loop but must be reset
                     # here because leaving it out (or, equivalently, setting it to None) would
                     # cause the model to sample a random system size. See set_param in model.py.
 
-                    loss = self.calculate_mse_step(
-                        H, param, basis_batch=None, use_symmetry=True
-                    )
+                    dummy_res = self.model.forward(H.basis, compute_phase=True)
+                    print(f"Ran forward for {system_size} spins at point {point}")
+
+                    # loss = self.calculate_mse_step(
+                    #     H, param, basis_batch=None, use_symmetry=True
+                    # )
 
                     self.optim.zero_grad()
-                    loss.backward()
-                    self.optim.step()
-                    scheduler.step()
+                    # [res.backward() for res in dummy_res]
+                    for res in dummy_res:
+                        del res
+                    # self.optim.step()
+                    # scheduler.step()
 
                     # TODO: after adding a schedule, be sure to call scheduler.step() here.
                     # TODO: should it be called here? Or after a Hamiltonian is done? Or after
@@ -329,9 +336,9 @@ class Optimizer:
                     # )
 
                 ham_end = time.time()
-                print(
-                    f"System size: {H.system_size}, Hamiltonian time: {ham_end - ham_start}, Last loss: {loss.item()}"
-                )
+                # print(
+                #     f"System size: {H.system_size}, Hamiltonian time: {ham_end - ham_start}, Last loss: {loss.item()}"
+                # )
 
-            epoch_end = time.time()
-            print(f"Epoch time: {epoch_end - epoch_start}")
+            # epoch_end = time.time()
+            # print(f"Epoch time: {epoch_end - epoch_start}")
