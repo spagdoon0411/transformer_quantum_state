@@ -234,7 +234,7 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
         self.h_step = h_step
 
         print(
-            f"Loaded dataset for system size {self.n} from {file_path}.\n (h_min, h_step, h_max) = ({h_min}, {h_step}, {h_max})."
+            f"Loaded dataset for system size {self.n} from {file_path}.\n(h_min, h_step, h_max) = ({h_min}, {h_step}, {h_max})."
         )
 
     def retrieve_ground(self, param, abs_tol=1e-5):
