@@ -33,6 +33,7 @@ class Symmetry:
         tensor: (n, ...)
         return a tensor with all symmetry operations applied, (n_symm, n, ...)
         """
+        # For Symmetry1D, applies a permutation for no reason?
         tensor = tensor[self.permutation]
         phase = self.phase
         if self.spin_inv_symm:
@@ -48,7 +49,9 @@ class Symmetry:
         """
         n, batch = tensor.shape
         idx = torch.randint(0, len(self.permutation), [batch])
-        tensor = tensor[self.permutation[idx], torch.arange(batch).reshape(batch, 1)]  # (batch, n)
+        tensor = tensor[
+            self.permutation[idx], torch.arange(batch).reshape(batch, 1)
+        ]  # (batch, n)
         if self.spin_inv_symm:
             inv_mask = torch.randint(0, 2, [batch], dtype=torch.bool)
             tensor[inv_mask] = 1 - tensor[inv_mask]
@@ -63,16 +66,15 @@ class Symmetry:
         tensor, inv_idx = torch.unique(tensor, dim=1, return_inverse=True)
         weight_unique = torch.zeros(tensor.shape[1])
         weight_unique.index_add_(0, inv_idx, weight)
-        assert torch.allclose(weight_unique.sum(), torch.tensor(1.))
+        assert torch.allclose(weight_unique.sum(), torch.tensor(1.0))
         return tensor, weight_unique
-
 
     def add_symmetry(self, symmetry, *args):
         try:
             symmetry_func = getattr(self, symmetry)
             symmetry_func(*args)
         except AttributeError:
-            raise ValueError('Unknown symmetry: {}'.format(symmetry))
+            raise ValueError("Unknown symmetry: {}".format(symmetry))
 
     def spin_inversion(self, phase=1):
         self.spin_inv_symm = True
@@ -88,6 +90,10 @@ class Symmetry1D(Symmetry):
         self.n = n
         self.permutation = torch.arange(n).view(1, n)
         self.phase = torch.ones(1)
+
+    # NOTE: author: Spandan - perhaps we'd want to selectively apply the reflection or
+    # translation symmetries down the line and that's why they're not called in the __call__ method.
+    # It might be neater to produce a call method that specifies symmetries with flags.
 
     def translation(self, phase=1):
         """
@@ -140,9 +146,11 @@ class Symmetry2D(Symmetry):
         perm = self.permutation
         batch, nx, ny = perm.shape
         idx = cyclic_permutation_idx(nx)  # (nx, nx)
-        perm = perm[torch.arange(batch).reshape(batch, 1, 1, 1),
-                    idx.reshape(nx, nx, 1),
-                    torch.arange(ny)]  # (batch, nx, nx, ny)
+        perm = perm[
+            torch.arange(batch).reshape(batch, 1, 1, 1),
+            idx.reshape(nx, nx, 1),
+            torch.arange(ny),
+        ]  # (batch, nx, nx, ny)
         self.permutation = perm.reshape(-1, nx, ny)  # (batch * nx, nx, ny)
 
         phase_i = phase ** torch.arange(nx)  # (nx, )
@@ -152,10 +160,14 @@ class Symmetry2D(Symmetry):
         perm = self.permutation
         batch, nx, ny = perm.shape
         idx = cyclic_permutation_idx(ny)  # (ny, ny)
-        perm = perm[torch.arange(batch).reshape(batch, 1, 1, 1),
-                    torch.arange(nx).reshape(nx, 1, 1),
-                    idx.reshape(1, ny, ny)]  # (batch, nx, ny, ny)
-        self.permutation = perm.permute(0, 2, 1, 3).reshape(-1, nx, ny)  # (batch * ny, nx, ny)
+        perm = perm[
+            torch.arange(batch).reshape(batch, 1, 1, 1),
+            torch.arange(nx).reshape(nx, 1, 1),
+            idx.reshape(1, ny, ny),
+        ]  # (batch, nx, ny, ny)
+        self.permutation = perm.permute(0, 2, 1, 3).reshape(
+            -1, nx, ny
+        )  # (batch * ny, nx, ny)
 
         phase_i = phase ** torch.arange(ny)  # (ny, )
         self.phase = torch.outer(self.phase, phase_i).reshape(-1)  # (batch * ny)
@@ -181,11 +193,17 @@ class Symmetry2D(Symmetry):
         perm_1 = perm.permute(0, 2, 1).flip(2)
         perm_2 = perm.flip(1, 2)
         perm_3 = perm.permute(0, 2, 1).flip(1)
-        self.permutation = torch.cat([perm, perm_1, perm_2, perm_3], dim=0)  # (batch * 4, nx, ny)
-        self.phase = torch.cat([self.phase,
-                                phase * self.phase,
-                                phase ** 2 * self.phase,
-                                phase ** 3 * self.phase])  # (batch * 4)
+        self.permutation = torch.cat(
+            [perm, perm_1, perm_2, perm_3], dim=0
+        )  # (batch * 4, nx, ny)
+        self.phase = torch.cat(
+            [
+                self.phase,
+                phase * self.phase,
+                phase**2 * self.phase,
+                phase**3 * self.phase,
+            ]
+        )  # (batch * 4)
 
     def rotation_180(self, phase):
         """
@@ -193,7 +211,9 @@ class Symmetry2D(Symmetry):
         return the rotated permutations, (batch * 2, nx, ny)
         """
         perm = self.permutation
-        self.permutation = torch.cat([perm, perm.flip(1, 2)], dim=0)  # (batch * 2, nx, ny)
+        self.permutation = torch.cat(
+            [perm, perm.flip(1, 2)], dim=0
+        )  # (batch * 2, nx, ny)
         self.phase = torch.cat([self.phase, phase * self.phase])  # (batch * 2)
 
 
@@ -203,8 +223,10 @@ class Symmetry_psi:
         basis = dec2bin(torch.arange(2**self.n), self.n)
         basis_t = torch.cat([basis[:, 1:], basis[:, :1]], dim=1)
         self.translation_idx = bin2dec(basis_t, self.n).to(torch.int64).cpu().numpy()
-        self.reflection_idx = bin2dec(basis.flip(1), self.n).to(torch.int64).cpu().numpy()
-        self.inversion_idx = bin2dec(1-basis, self.n).to(torch.int64).cpu().numpy()
+        self.reflection_idx = (
+            bin2dec(basis.flip(1), self.n).to(torch.int64).cpu().numpy()
+        )
+        self.inversion_idx = bin2dec(1 - basis, self.n).to(torch.int64).cpu().numpy()
 
     def translation(self, psi):
         # psi = psi[torch.arange(psi.shape[0]).unsqueeze(1), self.translation_idx]
@@ -227,18 +249,48 @@ class Symmetry2D_psi:
         self.nx = nx
         self.ny = ny
         self.n = nx * ny
-        basis = dec2bin(torch.arange(2**(nx*ny)), nx*ny).reshape(-1, nx, ny)
+        basis = dec2bin(torch.arange(2 ** (nx * ny)), nx * ny).reshape(-1, nx, ny)
         basis_tx = torch.cat([basis[:, 1:, :], basis[:, :1, :]], dim=1)
         basis_ty = torch.cat([basis[:, :, 1:], basis[:, :, :1]], dim=2)
         basis_rx = basis[:, :, :].flip(1)
         basis_ry = basis[:, :, :].flip(2)
         basis_r90 = basis.permute(0, 2, 1).flip(2)
-        self.tx_idx = bin2dec(basis_tx.reshape(-1, nx*ny), nx*ny).to(torch.int64).cpu().numpy()
-        self.ty_idx = bin2dec(basis_ty.reshape(-1, nx*ny), nx*ny).to(torch.int64).cpu().numpy()
-        self.rx_idx = bin2dec(basis_rx.reshape(-1, nx*ny), nx*ny).to(torch.int64).cpu().numpy()
-        self.ry_idx = bin2dec(basis_ry.reshape(-1, nx*ny), nx*ny).to(torch.int64).cpu().numpy()
-        self.r90_idx = bin2dec(basis_r90.reshape(-1, nx*ny), nx*ny).to(torch.int64).cpu().numpy()
-        self.inversion_idx = bin2dec(1 - basis.reshape(-1, nx*ny), self.n).to(torch.int64).cpu().numpy()
+        self.tx_idx = (
+            bin2dec(basis_tx.reshape(-1, nx * ny), nx * ny)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
+        self.ty_idx = (
+            bin2dec(basis_ty.reshape(-1, nx * ny), nx * ny)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
+        self.rx_idx = (
+            bin2dec(basis_rx.reshape(-1, nx * ny), nx * ny)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
+        self.ry_idx = (
+            bin2dec(basis_ry.reshape(-1, nx * ny), nx * ny)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
+        self.r90_idx = (
+            bin2dec(basis_r90.reshape(-1, nx * ny), nx * ny)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
+        self.inversion_idx = (
+            bin2dec(1 - basis.reshape(-1, nx * ny), self.n)
+            .to(torch.int64)
+            .cpu()
+            .numpy()
+        )
 
     def translation_x(self, psi):
         # psi = psi[torch.arange(psi.shape[0]).unsqueeze(1), self.tx_idx]
