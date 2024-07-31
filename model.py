@@ -164,7 +164,7 @@ class TransformerModel(nn.Module):
         param = self.param
 
         # Parity of the system size along each dimension
-        parity = (system_size % 2).to(torch.get_default_dtype())  # (n_dim, )
+        parity = system_size % 2  # .to(torch.get_default_dtype())  # (n_dim, )
 
         # Natural logarithm of the system size along each dimension
         size_input = torch.diag(system_size.log())  # (n_dim, n_dim)
@@ -236,6 +236,107 @@ class TransformerModel(nn.Module):
         """
         return 2 * pi * (1 + x / (1 + x.abs()))
 
+    def write_params_to_prefix(
+        self, values, prefix_encoding, n_dim, phys_dim, n_params, batch_size
+    ):
+        """
+        Parameters:
+            values: torch.Tensor (batch_size, n_params)
+                The parameter values to write, where each row is a point in parameter space.
+            prefix_encoding: torch.Tensor (prefix_dim, batch, input_dim)
+                The prefix or input encoding tensor to write to
+            n_dim: int
+                The number of physical dimensions of the system
+            phys_dim: int
+                The number of possible values for each site in the chain
+            n_params: int
+                The number of parameters of the Hamiltonian
+            batch_size: int
+                The number of points in parameter space that this batch includes
+        """
+
+        # Expand each parameter row to a diagonal matrix
+        values_diag = torch.diag_embed(values)
+
+        # Identify the prefix_dim-input_dim slice to write to (note that the parameters are
+        # written across the entire batch dimension)
+        prefix_dim_start = n_dim
+        prefix_dim_end = prefix_dim_start + n_params
+        input_dim_start = phys_dim + n_dim + 2  # This is param_offset
+        input_dim_end = input_dim_start + n_params
+
+        # Write the parameter values to the prefix encoding tensor
+        prefix_encoding[
+            prefix_dim_start:prefix_dim_end, :batch_size, input_dim_start:input_dim_end
+        ] = values_diag.swapaxes(0, 1)
+
+        return prefix_encoding
+
+    def wrap_spins_batch(self, params, spins, phys_dim, system_size):
+        """
+
+        Parameters:
+            params: torch.Tensor (batch_size, n_params)
+                The parameter values to write, where each row is a point in parameter space.
+            spins: torch.Tensor (n, batch_size)
+                The spin configurations to write, where each column is a point in the dataset.
+            phys_dim: int
+                The number of possible values for each site in the chain (i.e., each entry in spins)
+            system_size: torch.Tensor (n_dim, )
+                The number of sites in the system, along each physical dimension
+        """
+
+        n_params = params.shape[1]
+        n_dim = system_size.shape[0]
+
+        input_dim = phys_dim + n_dim + 2 + n_params
+        prefix_len = n_dim + n_params
+
+        n, batch_size = spins.shape
+        seq_encoding = torch.zeros(prefix_len + n, batch_size, input_dim)
+
+        size_input = torch.diag(system_size.log())
+        parity = system_size % 2
+
+        seq_encoding[:n_dim, :, phys_dim : (phys_dim + n_dim)] = size_input.unsqueeze(1)
+
+        seq_encoding[:n_dim, :, phys_dim + n_dim] = parity.unsqueeze(1)
+
+        seq_encoding = self.write_params_to_prefix(
+            params, seq_encoding, n_dim, phys_dim, n_params, batch_size
+        )
+
+        seq_encoding[prefix_len:, :, :phys_dim] = torch.functional.F.one_hot(
+            spins.to(torch.int64), num_classes=phys_dim
+        )
+
+        return seq_encoding
+
+    def forward_batched(
+        self, params, spins, system_size, phys_dim=2, compute_phase=True
+    ):
+
+        # Completes encoding for these spins entirely
+        src = self.wrap_spins_batch(params, spins, phys_dim, system_size)
+
+        # TODO: implement mask
+
+        src = self.encoder(src) * math.sqrt(self.embedding_size)
+
+        src = self.pos_encoder(src, self.system_size)
+
+        output = self.transformer_encoder(src, self.src_mask)
+
+        psi_output = output[self.seq_prefix_len - 1 :]
+
+        amp = F.log_softmax(self.amp_head(psi_output), dim=-1)
+
+        if compute_phase:
+            # TODO: is this being applied to the right dimension?
+            phase = self.softsign(self.phase_head(psi_output))
+
+        return [amp, phase]
+
     def forward(self, spins, compute_phase=True):
         # src: (seq, batch, input_dim)
         # use_symmetry: has no effect in this function
@@ -247,6 +348,7 @@ class TransformerModel(nn.Module):
             mask = self._generate_square_subsequent_mask(len(src)).to(src.device)
             self.src_mask = mask
 
+        # TODO Why would you obtain system sizes like this??
         system_size = src[
             : self.n_dim, 0, self.phys_dim : self.phys_dim + self.n_dim
         ].diag()  # (n_dim, )

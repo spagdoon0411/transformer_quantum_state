@@ -183,10 +183,8 @@ def sample_without_weight(model, batch=1000, symmetry=None):
     return samples
 
 
-def compute_psi(model, samples, symmetry=None, check_duplicate=True):
+def compute_psi(model, samples, symmetry=None, check_duplicate=True, params=None):
     """
-
-
     Parameters
     ----------
     model : The transformer model
@@ -225,9 +223,14 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
     batch_idx = torch.arange(batch).reshape(1, batch)
     spin_idx = samples.to(torch.int64)
 
-    log_amp, log_phase = model.forward(
-        samples, compute_phase=True
-    )  # (seq, batch, phys_dim)
+    if params is None:
+        log_amp, log_phase = model.forward(
+            samples, compute_phase=True
+        )  # (seq, batch, phys_dim)
+    else:
+        log_amp, log_phase = model.forward_batched(
+            params, samples, model.system_size, phys_dim=2, compute_phase=True
+        )
 
     # Ignore the last output (would be a conditional probability of an
     # n+1th spin given the first n spins and the coupling constants, but
@@ -265,6 +268,9 @@ def compute_psi(model, samples, symmetry=None, check_duplicate=True):
         log_phase = ((log_amp + 1j * log_phase) / 2).exp().mean(dim=0)
         log_phase = log_phase.imag.atan2(log_phase.real) * 2  # (batch0, )
         log_amp = log_amp.exp().mean(dim=0).log()  # (batch0, )
+
+    # TODO: return inverse indices here if duplicates were reduced
+
     return log_amp, log_phase
 
 
