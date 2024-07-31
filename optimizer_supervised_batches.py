@@ -241,13 +241,46 @@ class Optimizer:
         amp = torch.exp(log_amp)
         phase = torch.exp(1j * log_phase)
         return amp.mul(phase)
+    
+    def phase_normalize(self, phase):
+        """
+        Normalizes phases to be in [0, 2pi), then scales to be in [0, 1).
+        Note that phases are arguments of a complex number factor.
+
+        Parameters:
+            phase: torch.Tensor
+                Phases to normalize elementwise
+        Returns:
+            torch.Tensor
+                Normalized phases
+        """
+        phase = torch.remainder(phase, 2 * np.pi)
+        return phase / (2 * np.pi)
+    
+    def loss(self, probs, phases, psi_true, prob_weight, arg_weight):
+        """
+        A composite loss function considering probabilities and phases. Treats 
+        probabilities as probability distributions and uses binary cross entropy
+        to compare them as probability distributions. Compares phases using mean 
+        squared error. To scale the two losses, phases are divided by pi
+        """
+        probs_true = torch.abs(psi_true)
+        phases_true = self.phase_normalize(torch.angle(psi_true))
+        phases = self.phase_normalize(phases)
+        
+        bce = F.binary_cross_entropy(probs, probs_true, reduce='mean')
+        mse = F.mse_loss(phases, phases_true, reduce='mean')
+
+        return bce * prob_weight + mse * arg_weight
 
     def train(
         self,
         epochs,
+        monitor_params=None,
         param_range=None,
         ensemble_id=0,
         start_iter=None,
+        n_monitor_samples=10000
     ):
         """
         Trains the model to replicate the parameter-and-spin-sequence to ground
@@ -312,11 +345,13 @@ class Optimizer:
                         params=params,  # NOTE: setting this puts compute_psi in to the new cross-J batch mode
                     )
 
-                    psi_predicted = self.psi_from_logs(log_amp, log_phase)
+                    amp = torch.exp(log_amp)
+                    phase = torch.exp(log_phase)
 
-                    loss = F.mse_loss(
-                        torch.view_as_real(psi_predicted),
-                        torch.view_as_real(psi_true.to(torch.complex64)),
+                    loss = self.loss(
+                        amp, 
+                        phase, 
+                        psi_true,
                     )
 
                     unique_params = torch.unique(params)
@@ -326,6 +361,18 @@ class Optimizer:
                     print(
                         f"Epoch {i} iter {iter} - Loss for system size {system_size} and h-range {param_max}-{param_min}: {loss.item()}"
                     )
+
+                    if iter % self.ckpt_freq == 0:
+                        torch.save(
+                            self.model.state_dict(),
+                            f"supervised_results/ckpt_{iter}_{save_str}.ckpt",
+                        )
+
+                    if not monitor_params is None:
+                        raise NotImplementedError(
+                            "Monitoring of observables is not implemented yet."
+                        )
+
                     # print(
                     #   f"Energy: {H.Eloc(psi_predicted, None, self.model, H.symmetry)}"
                     # )
