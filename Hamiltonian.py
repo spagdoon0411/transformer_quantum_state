@@ -275,7 +275,6 @@ class Ising(Hamiltonian):
         ]
 
         self.basis = self.get_basis()
-        self.basis = self.basis.to("cuda")
 
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
