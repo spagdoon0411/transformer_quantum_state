@@ -101,7 +101,7 @@ for N in Nrange # TODO: allocate threads more explicitly
     for h in hrange
         println("N = $N, h = $h")
         @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
-        push!(ground_state_df, (N, h, energy, abs.(state)))
+        push!(ground_state_df, (N, h, energy, state))
     end
 
     Arrow.write(table_file, ground_state_df, file=true)
