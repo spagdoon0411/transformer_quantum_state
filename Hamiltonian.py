@@ -252,7 +252,7 @@ class Hamiltonian:
 
 
 class Ising(Hamiltonian):
-    def __init__(self, system_size, periodic=True):
+    def __init__(self, system_size, periodic=True, generate_basis=False):
         super().__init__()
         self.system_size = torch.tensor(system_size).reshape(-1)
         self.n_dim = len(self.system_size)
@@ -274,7 +274,8 @@ class Ising(Hamiltonian):
             (["X"], [self.h], self.external_field),
         ]
 
-        self.basis = self.get_basis()
+        if generate_basis:
+            self.basis = self.get_basis()
 
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
