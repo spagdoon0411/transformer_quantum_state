@@ -13,6 +13,9 @@ from tenpy.algorithms import dmrg
 from Hamiltonian_utils import generate_spin_idx
 from symmetry import Symmetry1D, Symmetry2D
 
+# from batch_ising_dataset import IsingIterableDatasetSequential
+from batch_ising_dataset import IsingRandomSampler, IsingDataset
+
 
 class Ising(Hamiltonian):
     def __init__(self, system_size, periodic=True):
@@ -35,7 +38,7 @@ class Ising(Hamiltonian):
         self.n = self.system_size.prod()
 
         self.param_dim = 1
-        self.param_range = torch.tensor([[0.5], [1.5]], device="cpu")
+        self.param_range = torch.tensor([[0.5], [1.5]])
         self.J = -1
         self.h = 1
         self.connections = generate_spin_idx(
@@ -50,7 +53,6 @@ class Ising(Hamiltonian):
         ]
 
         self.basis = self.get_basis()
-        self.basis = self.basis.to("cuda")
 
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
@@ -66,6 +68,7 @@ class Ising(Hamiltonian):
 
         self.h_step = None
         self.dataset = None
+        self.training_dataset = None
 
     def update_param(self, param):
         # param: (1, )
@@ -158,7 +161,9 @@ class Ising(Hamiltonian):
             )
         return E * 4, psi, M
 
-    def load_dataset(self, data_dir_path: str):
+    def load_dataset(
+        self, data_dir_path: str, batch_size: int = 1000, samples_in_epoch=100
+    ):
         """
         Given a directory path, searches for a file in the directory called
         meta.json. Expects the meta.json file to contain the keys:
@@ -195,6 +200,14 @@ class Ising(Hamiltonian):
         Parameters:
         data_dir_path: str
             The path to the directory containing the meta.json file
+        batch_size: int
+            The number of batches to retrieve from this Hamiltonian's internal
+            IsingIterableDatasetSequential at a time for training. Note that the
+            model is agnostic to the batch size, so this can be set to something that
+            is reasonable given the sizes of the Hamiltonian's Hilbert space.
+        samples_in_epoch: int
+            The number of batch_size-sized samples that constitute an epoch of the
+            sampler
 
         Returns:
         None
@@ -221,6 +234,9 @@ class Ising(Hamiltonian):
         this_h_max = self.param_range[1].item()
         h_step = metadata["h_step"]
 
+        # TODO: assert that dataset has the right row dimension (2**n) and an appropriate
+        # number of rows. Provide a warning if some rows are missing.
+
         if h_min != self.param_range[0].item() or h_max != self.param_range[1].item():
             warning = """Warning: h values in metadata file do not match Hamiltonian's param_range; \
 found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting param_range to match.""".format(
@@ -232,6 +248,17 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
             print(warning)
 
         self.h_step = h_step
+
+        # self.training_dataset = IsingIterableDatasetSequential(
+        #     self.dataset, batch_size, self.basis
+        # )
+
+        self.training_dataset = IsingRandomSampler(
+            data_source=IsingDataset(self.dataset, self.basis),
+            replacement=True,
+            num_samples=samples_in_epoch,
+            batch_size=batch_size,
+        )
 
         print(
             f"Loaded dataset for system size {self.n} from {file_path}.\n(h_min, h_step, h_max) = ({h_min}, {h_step}, {h_max})."
