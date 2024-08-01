@@ -275,13 +275,13 @@ class Optimizer:
 
         return bce * prob_weight + mse * arg_weight
 
-    def show_energy_report(self, monitor_params, monitor_hamiltonians):
+    def show_energy_report(self, monitor_params, monitor_hamiltonians, monitor_energies):
         with torch.no_grad():
             for param in monitor_params:
-                for ham in monitor_hamiltonians:
+                for ham, E_ground in zip(monitor_hamiltonians, monitor_energies):
                     E_mean, E_var, Er, Ei = self.extract_energy_estimate(ham, param)
-                    E_ground, psi_ground = ham.retrieve_ground(param=param.item())
-                    relative_error = np.abs((E_mean - E_ground) / E_ground)
+                    E_ground = monitor_energies
+                    relative_error = torch.abs((E_mean - E_ground) / E_ground)
 
                     print(
                         f"\tparam={param}, system_size={ham.system_size} - Relative Error: {relative_error}\n\t\tEnergy: {E_mean}, Variance: {E_var}, Real: {Er}, Imag: {Ei}"
@@ -309,8 +309,13 @@ class Optimizer:
         """
         self.model.set_param(system_size=H.system_size, param=param)
         symmetry = H.symmetry
+        sample_start = time.time()
         samples, sample_weight = sample(self.model, num_samples, max_unique, symmetry)
+        sample_end = time.time()
+        eloc_start = time.time()
         E = H.Eloc(samples, sample_weight, self.model, symmetry)
+        eloc_end = time.time()
+        print(f"Sample time: {sample_end - sample_start}, Eloc time: {eloc_end - eloc_start}")
         E_mean = (E * sample_weight).sum()
         E_var = (
             (((E - E_mean).abs() ** 2 * sample_weight).sum() / H.n**2)
@@ -328,6 +333,7 @@ class Optimizer:
         epochs,
         monitor_params=None,
         monitor_hamiltonians=None,
+        monitor_energies=None,
         param_range=None,
         ensemble_id=0,
         start_iter=None,
@@ -387,6 +393,8 @@ class Optimizer:
 
                     self.model.set_param(system_size=system_size, param=None)
 
+                    psi_start = time.time()
+
                     log_amp, log_phase = compute_psi(
                         self.model,
                         basis_states,
@@ -394,6 +402,8 @@ class Optimizer:
                         check_duplicate=False,
                         params=params,  # NOTE: setting this puts compute_psi in to the new cross-J batch mode
                     )
+
+                    psi_end = time.time()
 
                     amp = torch.exp(log_amp)
                     phase = log_phase
@@ -403,16 +413,22 @@ class Optimizer:
                     # print(phase)
                     # print(log_phase)
 
+                    loss_time = time.time()
+
                     loss = self.loss(
                         amp,
                         phase,
                         psi_true,
                     )
 
+                    loss_end = time.time()
+
+                    backprop_start = time.time()    
                     self.optim.zero_grad()
                     loss.backward()
                     self.optim.step()
                     scheduler.step()
+                    backprop_end = time.time()
 
                     unique_params = torch.unique(params)
                     param_max = torch.max(unique_params)
@@ -428,11 +444,16 @@ class Optimizer:
                             f"supervised_results/ckpt_{iter}_{save_str}.ckpt",
                         )
 
+                    energy_start = time.time()
+
                     if not monitor_params is None:
-                        self.model.set_param(
-                            system_size=system_size, param=monitor_params[0]
-                        )
-                        self.show_energy_report(monitor_params, monitor_hamiltonians)
+                        self.show_energy_report(monitor_params, monitor_hamiltonians, monitor_energies)
+
+                    energy_end = time.time()
+
+                    print(
+                        f"Time breakdown: psi: {psi_end - psi_start}, loss: {loss_end - loss_time}, backprop: {backprop_end - backprop_start}, energy: {energy_end - energy_start}"
+                    )
 
                     # print(
                     #   f"Energy: {H.Eloc(psi_predicted, None, self.model, H.symmetry)}"
@@ -444,3 +465,6 @@ class Optimizer:
                 print(
                     f"Hamiltonian for size {system_size} took {ham_end - ham_start} seconds"
                 )
+
+            epoch_end = time.time()
+            print(f"Epoch {i} took {epoch_end - epoch_start} seconds")
