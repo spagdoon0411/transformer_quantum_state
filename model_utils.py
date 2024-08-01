@@ -339,7 +339,7 @@ def compute_observable(
     Parameters
     ----------
     model : The transformer model
-    samples : (n_param+n, batch, input_dim)
+    samples : (n, batch, input_dim)
         samples drawn from the wave function
     sample_weight: (batch, )
         weight for each sample
