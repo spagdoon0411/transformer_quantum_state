@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from model_utils import sample, compute_grad, compute_psi
 from evaluation import compute_E_sample, compute_magnetization
+from Hamiltonian import Hamiltonian
 import autograd_hacks
 from SR import SR
 import itertools
@@ -241,7 +242,7 @@ class Optimizer:
         amp = torch.exp(log_amp)
         phase = torch.exp(1j * log_phase)
         return amp.mul(phase)
-    
+
     def phase_normalize(self, phase):
         """
         Normalizes phases to be in [0, 2pi), then scales to be in [0, 1).
@@ -256,31 +257,80 @@ class Optimizer:
         """
         phase = torch.remainder(phase, 2 * np.pi)
         return phase / (2 * np.pi)
-    
-    def loss(self, probs, phases, psi_true, prob_weight, arg_weight):
+
+    def loss(self, probs, phases, psi_true, prob_weight=0.5, arg_weight=0.5):
         """
-        A composite loss function considering probabilities and phases. Treats 
+        A composite loss function considering probabilities and phases. Treats
         probabilities as probability distributions and uses binary cross entropy
-        to compare them as probability distributions. Compares phases using mean 
+        to compare them as probability distributions. Compares phases using mean
         squared error. To scale the two losses, phases are divided by pi
         """
-        probs_true = torch.abs(psi_true)
-        phases_true = self.phase_normalize(torch.angle(psi_true))
+        probs_true = torch.abs(psi_true).to(torch.float32)
+        phases_true = torch.angle(psi_true).to(torch.float32)
+        phases_true = self.phase_normalize(torch.angle(psi_true)).to(torch.float32)
         phases = self.phase_normalize(phases)
-        
-        bce = F.binary_cross_entropy(probs, probs_true, reduce='mean')
-        mse = F.mse_loss(phases, phases_true, reduce='mean')
+
+        bce = F.binary_cross_entropy(probs, probs_true, reduce="mean")
+        mse = F.mse_loss(phases, phases_true, reduce="mean")
 
         return bce * prob_weight + mse * arg_weight
+
+    def show_energy_report(self, monitor_params, monitor_hamiltonians):
+        with torch.no_grad():
+            for param in monitor_params:
+                for ham in monitor_hamiltonians:
+                    E_mean, E_var, Er, Ei = self.extract_energy_estimate(ham, param)
+                    E_ground, psi_ground = ham.retrieve_ground(param=param.item())
+                    relative_error = np.abs((E_mean - E_ground) / E_ground)
+
+                    print(
+                        f"\tparam={param}, system_size={ham.system_size} - Relative Error: {relative_error}\n\t\tEnergy: {E_mean}, Variance: {E_var}, Real: {Er}, Imag: {Ei}"
+                    )
+
+    def extract_energy_estimate(
+        self,
+        H: Hamiltonian,
+        param: torch.Tensor,
+        num_samples: int = 10000,
+        max_unique: int = 1000,
+    ):
+        """
+        Extracts an energy estimate from the model using the Hamiltonian H.
+        Parameters:
+            H: Hamiltonian
+                The Hamiltonian object to use to produce the energy estimate
+            param: torch.Tensor
+                The parameters to obtain the energy estimate for
+            num_samples: int
+                The number of samples from the wave function the model represents to use
+                in energy estimation
+            max_unique: int
+                The maximum number of unique samples to generate (see sample in model_utils.py)
+        """
+        self.model.set_param(system_size=H.system_size, param=param)
+        symmetry = H.symmetry
+        samples, sample_weight = sample(self.model, num_samples, max_unique, symmetry)
+        E = H.Eloc(samples, sample_weight, self.model, symmetry)
+        E_mean = (E * sample_weight).sum()
+        E_var = (
+            (((E - E_mean).abs() ** 2 * sample_weight).sum() / H.n**2)
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        Er = (E_mean.real / H.n).detach().cpu().numpy()
+        Ei = (E_mean.imag / H.n).detach().cpu().numpy()
+
+        return E_mean, E_var, Er, Ei
 
     def train(
         self,
         epochs,
         monitor_params=None,
+        monitor_hamiltonians=None,
         param_range=None,
         ensemble_id=0,
         start_iter=None,
-        n_monitor_samples=10000
     ):
         """
         Trains the model to replicate the parameter-and-spin-sequence to ground
@@ -346,41 +396,47 @@ class Optimizer:
                     )
 
                     amp = torch.exp(log_amp)
-                    phase = torch.exp(log_phase)
+                    phase = log_phase
+
+                    # print(amp)
+                    # print(log_amp)
+                    # print(phase)
+                    # print(log_phase)
 
                     loss = self.loss(
-                        amp, 
-                        phase, 
+                        amp,
+                        phase,
                         psi_true,
                     )
+
+                    self.optim.zero_grad()
+                    loss.backward()
+                    self.optim.step()
+                    scheduler.step()
 
                     unique_params = torch.unique(params)
                     param_max = torch.max(unique_params)
                     param_min = torch.min(unique_params)
 
                     print(
-                        f"Epoch {i} iter {iter} - Loss for system size {system_size} and h-range {param_max}-{param_min}: {loss.item()}"
+                        f"Epoch {i} iter {iter} - Loss for system size {system_size} and h-range {param_min}-{param_max}: {loss.item()}"
                     )
 
-                    if iter % self.ckpt_freq == 0:
+                    if True or iter % self.ckpt_freq == 0:
                         torch.save(
                             self.model.state_dict(),
                             f"supervised_results/ckpt_{iter}_{save_str}.ckpt",
                         )
 
                     if not monitor_params is None:
-                        raise NotImplementedError(
-                            "Monitoring of observables is not implemented yet."
+                        self.model.set_param(
+                            system_size=system_size, param=monitor_params[0]
                         )
+                        self.show_energy_report(monitor_params, monitor_hamiltonians)
 
                     # print(
                     #   f"Energy: {H.Eloc(psi_predicted, None, self.model, H.symmetry)}"
                     # )
-
-                    self.optim.zero_grad()
-                    loss.backward()
-                    self.optim.step()
-                    scheduler.step()
 
                     iter += 1
 
