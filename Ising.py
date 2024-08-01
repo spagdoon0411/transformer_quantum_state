@@ -13,12 +13,15 @@ from tenpy.algorithms import dmrg
 from Hamiltonian_utils import generate_spin_idx
 from symmetry import Symmetry1D, Symmetry2D
 
-# from batch_ising_dataset import IsingIterableDatasetSequential
-from batch_ising_dataset import IsingRandomSampler, IsingDataset
+from batch_ising_dataset import (
+    IsingRandomSampler,
+    IsingDataset,
+    IsingIterableDatasetSequential,
+)
 
 
 class Ising(Hamiltonian):
-    def __init__(self, system_size, periodic=True):
+    def __init__(self, system_size, periodic=True, get_basis=False):
         """
         Parameters:
         system_size: torch.Tensor (n_dim, n_systems)
@@ -52,7 +55,8 @@ class Ising(Hamiltonian):
             (["X"], [self.h], self.external_field),
         ]
 
-        self.basis = self.get_basis()
+        if get_basis:
+            self.basis = self.get_basis()
 
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
@@ -162,7 +166,11 @@ class Ising(Hamiltonian):
         return E * 4, psi, M
 
     def load_dataset(
-        self, data_dir_path: str, batch_size: int = 1000, samples_in_epoch=100
+        self,
+        data_dir_path: str,
+        batch_size: int = 1000,
+        samples_in_epoch=100,
+        sampling_type="random",
     ):
         """
         Given a directory path, searches for a file in the directory called
@@ -208,6 +216,9 @@ class Ising(Hamiltonian):
         samples_in_epoch: int
             The number of batch_size-sized samples that constitute an epoch of the
             sampler
+        sampling_type: str
+            "random" or "sequential".
+
 
         Returns:
         None
@@ -253,12 +264,19 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
         #     self.dataset, batch_size, self.basis
         # )
 
-        self.training_dataset = IsingRandomSampler(
-            data_source=IsingDataset(self.dataset, self.basis),
-            replacement=True,
-            num_samples=samples_in_epoch,
-            batch_size=batch_size,
-        )
+        if sampling_type == "random":
+            self.training_dataset = IsingRandomSampler(
+                data_source=IsingDataset(self.dataset, self.basis),
+                replacement=True,
+                num_samples=samples_in_epoch,
+                batch_size=batch_size,
+            )
+        elif sampling_type == "sequential":
+            self.training_dataset = IsingIterableDatasetSequential(
+                self.dataset, batch_size, self.basis
+            )
+        else:
+            raise ValueError("Sampling type must be 'random' or 'sequential'")
 
         print(
             f"Loaded dataset for system size {self.n} from {file_path}.\n(h_min, h_step, h_max) = ({h_min}, {h_step}, {h_max})."
