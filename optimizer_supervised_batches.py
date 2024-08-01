@@ -291,8 +291,8 @@ class Optimizer:
         self,
         H: Hamiltonian,
         param: torch.Tensor,
-        num_samples: int = 10000,
-        max_unique: int = 1000,
+        num_samples: int = 1000000,
+        max_unique: int = 100,
     ):
         """
         Extracts an energy estimate from the model using the Hamiltonian H.
@@ -309,13 +309,8 @@ class Optimizer:
         """
         self.model.set_param(system_size=H.system_size, param=param)
         symmetry = H.symmetry
-        sample_start = time.time()
         samples, sample_weight = sample(self.model, num_samples, max_unique, symmetry)
-        sample_end = time.time()
-        eloc_start = time.time()
-        E = H.Eloc(samples, sample_weight, self.model, symmetry)
-        eloc_end = time.time()
-        print(f"Sample time: {sample_end - sample_start}, Eloc time: {eloc_end - eloc_start}")
+        E = H.Eloc(samples, sample_weight, self.model, use_symmetry=True)
         E_mean = (E * sample_weight).sum()
         E_var = (
             (((E - E_mean).abs() ** 2 * sample_weight).sum() / H.n**2)
@@ -452,12 +447,8 @@ class Optimizer:
                     energy_end = time.time()
 
                     print(
-                        f"Time breakdown: psi: {psi_end - psi_start}, loss: {loss_end - loss_time}, backprop: {backprop_end - backprop_start}, energy: {energy_end - energy_start}"
+                        f"Time breakdown: psi: {psi_end - psi_start}, loss: {loss_end - loss_time}, backprop: {backprop_end - backprop_start}, energy retrieval: {energy_end - energy_start}"
                     )
-
-                    # print(
-                    #   f"Energy: {H.Eloc(psi_predicted, None, self.model, H.symmetry)}"
-                    # )
 
                     iter += 1
 
