@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pos_encoding import TQSPositionalEncoding1D, TQSPositionalEncoding2D
 from model_utils import sample, sample_without_weight
+import time
 
 # from torch.nn import TransformerEncoderLayer
 
@@ -322,6 +323,10 @@ class TransformerModel(nn.Module):
         # TODO: implement mask
 
         src = self.encoder(src) * math.sqrt(self.embedding_size)
+
+        if self.src_mask is None or self.src_mask.size(0) != len(src):
+            mask = self._generate_square_subsequent_mask(len(src)).to(src.device)
+            self.src_mask = mask
 
         src = self.pos_encoder(src, self.system_size)
 
