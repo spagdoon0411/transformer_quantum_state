@@ -21,6 +21,14 @@ from batch_ising_dataset import (
 
 from torch.utils.data import RandomSampler, BatchSampler
 
+pi = np.pi
+X = sparse.csr_matrix(np.array([[0, 1], [1, 0]], dtype=np.float64))
+Y = sparse.csr_matrix(np.array([[0, -1j], [1j, 0]], dtype=np.complex128))
+Z = sparse.csr_matrix(np.array([[1, 0], [0, -1]], dtype=np.float64))
+I = sparse.csr_matrix(np.array([[1, 0], [0, 1]], dtype=np.float64))
+Sp = sparse.csr_matrix(np.array([[0, 1], [0, 0]], dtype=np.float64))
+Sm = sparse.csr_matrix(np.array([[0, 0], [1, 0]], dtype=np.float64))
+
 
 class Ising(Hamiltonian):
     def __init__(self, system_size, periodic=True, get_basis=False):
