@@ -289,6 +289,11 @@ class Optimizer:
         Ei = (E_mean.imag / H.n).detach().cpu().numpy()
 
         return E_mean, E_var, Er, Ei
+    
+    # Performs a mapping from one degenerate state to the other. Does not 
+    # account for the parameter range.
+    def ising_degen(self, phases, probs):
+        return (-phases, probs)
 
     def train(
         self,
@@ -383,9 +388,15 @@ class Optimizer:
 
                     loss_time = time.time()
 
-                    loss = prob_phase_loss(
+                    loss1 = prob_phase_loss(
                         log_prob, log_phase, psi_true, prob_weight=0.5, arg_weight=0.5
                     )
+
+                    loss2 = prob_phase_loss(
+                        log_prob, log_phase, -psi_true, prob_weight=0.5, arg_weight=0.5
+                    )
+
+                    loss = torch.min(loss1, loss2)
 
                     loss_end = time.time()
 
