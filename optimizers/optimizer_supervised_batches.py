@@ -18,7 +18,7 @@ from hamiltonians.Hamiltonian import Hamiltonian
 import model.autograd_hacks as autograd_hacks
 from model.SR import SR
 import itertools
-
+from model.loss_functions import prob_phase_loss
 
 class Optimizer:
     def __init__(self, model, Hamiltonians, point_of_interest=None):
@@ -238,43 +238,6 @@ class Optimizer:
 
         return itertools.product(*parameter_ranges)
 
-    def psi_from_logs(self, log_amp, log_phase):
-        amp = torch.exp(log_amp)
-        phase = torch.exp(1j * log_phase)
-        return amp.mul(phase)
-
-    def phase_normalize(self, phase):
-        """
-        Normalizes phases to be in [0, 2pi), then scales to be in [0, 1).
-        Note that phases are arguments of a complex number factor.
-
-        Parameters:
-            phase: torch.Tensor
-                Phases to normalize elementwise
-        Returns:
-            torch.Tensor
-                Normalized phases
-        """
-        phase = torch.remainder(phase, 2 * np.pi)
-        return phase / (2 * np.pi)
-
-    def loss(self, probs, phases, psi_true, prob_weight=0.5, arg_weight=0.5):
-        """
-        A composite loss function considering probabilities and phases. Treats
-        probabilities as probability distributions and uses binary cross entropy
-        to compare them as probability distributions. Compares phases using mean
-        squared error. To scale the two losses, phases are divided by pi
-        """
-        probs_true = torch.abs(psi_true).to(torch.float32)
-        phases_true = torch.angle(psi_true).to(torch.float32)
-        phases_true = self.phase_normalize(torch.angle(psi_true)).to(torch.float32)
-        phases = self.phase_normalize(phases)
-
-        bce = F.binary_cross_entropy(probs, probs_true, reduce="mean")
-        mse = F.mse_loss(phases, phases_true, reduce="mean")
-
-        return bce * prob_weight + mse * arg_weight
-
     def show_energy_report(
         self, monitor_params, monitor_hamiltonians, monitor_energies, E_errors
     ):
@@ -336,6 +299,8 @@ class Optimizer:
         param_range=None,
         ensemble_id=0,
         start_iter=None,
+        prob_weight=0.5,
+        arg_weight=0.5,
     ):
         """
         Trains the model to replicate the parameter-and-spin-sequence to ground
@@ -355,6 +320,12 @@ class Optimizer:
                 perhaps from a desired distribution?
             ensemble_id: int
             start_iter: int | None
+            prob_weight: float
+                The weight assigned to the probability loss term in the composite loss function.
+                0.5 by default.
+            arg_weight: float
+                The weight assigned to the phase loss term in the composite loss function
+                0.5 by default.
         """
 
         name, embedding_size, n_head, n_layers = (
@@ -400,7 +371,7 @@ class Optimizer:
 
                     psi_start = time.time()
 
-                    log_amp, log_phase = compute_psi(
+                    log_prob, log_phase = compute_psi(
                         self.model,
                         basis_states,
                         symmetry=None,  # H.symmetry,  # TODO: fix duplicate checking
@@ -410,20 +381,10 @@ class Optimizer:
 
                     psi_end = time.time()
 
-                    amp = torch.exp(log_amp)
-                    phase = log_phase
-
-                    # print(amp)
-                    # print(log_amp)
-                    # print(phase)
-                    # print(log_phase)
-
                     loss_time = time.time()
 
-                    loss = self.loss(
-                        amp,
-                        phase,
-                        psi_true,
+                    loss = prob_phase_loss(
+                        log_prob, log_phase, psi_true, prob_weight=0.5, arg_weight=0.5
                     )
 
                     loss_end = time.time()

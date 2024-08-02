@@ -24,6 +24,15 @@ torch.set_default_dtype(torch.float32)
 
 system_sizes = torch.arange(15, 15 + 2, 2).reshape(-1, 1)
 Hamiltonians = [Ising(size, periodic=True, get_basis=True) for size in system_sizes]
+data_dir_path = os.path.join("TFIM_ground_states", "2024-08-02T12-12-55.238")
+for ham in Hamiltonians:
+    ham.load_dataset(
+        data_dir_path,
+        batch_size=30000,
+        samples_in_epoch=100,
+        sampling_type="shuffled",
+    )
+
 param_dim = Hamiltonians[0].param_dim
 embedding_size = 32
 n_head = 8
@@ -34,16 +43,6 @@ minibatch = 10000
 param_range = None
 point_of_interest = None
 use_SR = False
-
-data_dir_path = os.path.join("TFIM_ground_states", "2024-07-24T19-26-39.836")
-
-for ham in Hamiltonians:
-    ham.load_dataset(
-        data_dir_path,
-        batch_size=30000,
-        samples_in_epoch=100,
-        sampling_type="sequential",
-    )
 
 testmodel = TransformerModel(
     system_sizes,
