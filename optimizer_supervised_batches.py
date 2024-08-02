@@ -275,13 +275,17 @@ class Optimizer:
 
         return bce * prob_weight + mse * arg_weight
 
-    def show_energy_report(self, monitor_params, monitor_hamiltonians, monitor_energies):
+    def show_energy_report(
+        self, monitor_params, monitor_hamiltonians, monitor_energies, E_errors
+    ):
         with torch.no_grad():
             for param in monitor_params:
                 for ham, E_ground in zip(monitor_hamiltonians, monitor_energies):
                     E_mean, E_var, Er, Ei = self.extract_energy_estimate(ham, param)
-                    E_ground = monitor_energies
+                    print("E_mean", E_mean, "E_ground", E_ground, "param", param)
                     relative_error = torch.abs((E_mean - E_ground) / E_ground)
+
+                    E_errors.append(relative_error)
 
                     print(
                         f"\tparam={param}, system_size={ham.system_size} - Relative Error: {relative_error}\n\t\tEnergy: {E_mean}, Variance: {E_var}, Real: {Er}, Imag: {Ei}"
@@ -375,16 +379,22 @@ class Optimizer:
             ),
         )
 
+        self.E_errors_all = []
+
         for i in range(epochs):
             epoch_start = time.time()
+
+            E_errors = []
 
             iter = 0
             for H in self.Hamiltonians:
                 ham_start = time.time()
                 system_size = H.system_size
                 dataset = H.training_dataset
+                sampler = H.sampler
 
-                for basis_states, params, psi_true in dataset:
+                for batch_idx in sampler:
+                    basis_states, params, psi_true = dataset[batch_idx]
 
                     self.model.set_param(system_size=system_size, param=None)
 
@@ -418,7 +428,7 @@ class Optimizer:
 
                     loss_end = time.time()
 
-                    backprop_start = time.time()    
+                    backprop_start = time.time()
                     self.optim.zero_grad()
                     loss.backward()
                     self.optim.step()
@@ -442,7 +452,12 @@ class Optimizer:
                     energy_start = time.time()
 
                     if not monitor_params is None:
-                        self.show_energy_report(monitor_params, monitor_hamiltonians, monitor_energies)
+                        self.show_energy_report(
+                            monitor_params,
+                            monitor_hamiltonians,
+                            monitor_energies,
+                            E_errors,
+                        )
 
                     energy_end = time.time()
 
@@ -456,6 +471,8 @@ class Optimizer:
                 print(
                     f"Hamiltonian for size {system_size} took {ham_end - ham_start} seconds"
                 )
+
+            self.E_errors_all.append(E_errors)
 
             epoch_end = time.time()
             print(f"Epoch {i} took {epoch_end - epoch_start} seconds")
