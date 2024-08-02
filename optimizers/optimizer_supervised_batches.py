@@ -388,15 +388,11 @@ class Optimizer:
 
                     loss_time = time.time()
 
-                    loss1 = prob_phase_loss(
-                        log_prob, log_phase, psi_true, prob_weight=0.5, arg_weight=0.5
-                    )
+                    degenerate = params < 1
 
-                    loss2 = prob_phase_loss(
-                        log_prob, log_phase, -psi_true, prob_weight=0.5, arg_weight=0.5
+                    loss = prob_phase_loss(
+                        log_prob, log_phase, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=degenerate 
                     )
-
-                    loss = torch.min(loss1, loss2)
 
                     loss_end = time.time()
 

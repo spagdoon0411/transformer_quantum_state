@@ -25,6 +25,8 @@ def angular_loss_sq(angle, target, reduction="mean"):
     # Before normalization, the lso is between 0 and pi^2
     res = res / (torch.pi**2)
 
+    print("unreduced loss: ", res)
+
     match reduction:
         case "mean":
             return torch.mean(res)
@@ -36,7 +38,7 @@ def angular_loss_sq(angle, target, reduction="mean"):
             raise ValueError("Invalid reduction type. Must be one of 'mean', 'sum', or 'none'.")
         
 
-def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5, degen_function=None):
+def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=None):
     """
     A composite loss function considering probabilities and phases. Treats
     probabilities as probability distributions and uses KL divergence to compare
@@ -61,6 +63,11 @@ def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight
             The weight of the probability loss term
         arg_weight: float
             The weight of the phase loss term
+        degenerate: torch.Tensor
+            A boolean tensor with dimension (batch_size,) indicating whether the label 
+            at each index is a degenerate ground state. If degenerate[i] is True, the
+            phase loss will be a minimum over both the true phase and the true
+            phase plus pi. 
     """
 
     if not math.isclose(prob_weight + arg_weight, 1.0):
@@ -73,8 +80,21 @@ def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
 
-    phase_loss = angular_loss_sq(log_phases, phases_true)
+    this_state_loss = angular_loss_sq(log_phases, phases_true, reduction="none")
+    degen_state_loss = angular_loss_sq(log_phases, phases_true + torch.pi, reduction="none")
+
+    phase_loss = torch.where(
+        degenerate, 
+        torch.min(
+            this_state_loss, 
+            degen_state_loss
+        ),
+        this_state_loss
+    ).mean()
+
     prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(log_probs, probs_true)
+
+    print(prob_loss)
 
     # This loss is a superposition of the probability and phase losses, where the ratio 
     # is a hyperparameter. 
