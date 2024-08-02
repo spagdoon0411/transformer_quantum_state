@@ -79,9 +79,46 @@ oneidx = torch.where(dmrg40_h_values == 1.0)[0][0]
 opt = Optimizer(testmodel, Hamiltonians, point_of_interest=point_of_interest)
 
 opt.train(
-    epochs=1,
+    epochs=5,
     start_iter=0,
     monitor_params=torch.tensor([[1.0]]),
     monitor_hamiltonians=[ising40],
-    monitor_energies=torch.tensor([[dmrg40_h_values[oneidx]]]),
+    monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
 )
+
+errors1 = torch.tensor(opt.E_errors_all)
+
+opt.train(
+    epochs=5,
+    start_iter=0,
+    monitor_params=torch.tensor([[1.0]]),
+    monitor_hamiltonians=[ising40],
+    monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
+)
+
+errors2 = torch.tensor(opt.E_errors_all)
+
+opt.train(
+    epochs=5,
+    start_iter=0,
+    monitor_params=torch.tensor([[1.0]]),
+    monitor_hamiltonians=[ising40],
+    monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
+)
+
+errors3 = torch.tensor(opt.E_errors_all)
+
+import matplotlib.pyplot as plt
+
+plt.plot(errors1.flatten().cpu().numpy(), label="errors1")
+plt.plot(errors2.flatten().cpu().numpy(), label="errors2")
+plt.plot(errors3.flatten().cpu().numpy(), label="errors3")
+plt.xlabel("Iteration")
+plt.ylabel("Epochs' Errors vs Iteration")
+plt.legend()
+
+for i in range(1, 3):
+    plt.axvline(x=i * errors1.shape[1], color="r", linestyle="--")
+
+plt.savefig("errors_vs_iteration.png")
+plt.show()
