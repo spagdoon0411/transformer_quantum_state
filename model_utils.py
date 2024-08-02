@@ -334,8 +334,6 @@ def compute_observable(
     model, samples, sample_weight, observable, batch_mean=True, symmetry=None
 ):
     """
-
-
     Parameters
     ----------
     model : The transformer model
