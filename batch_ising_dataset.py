@@ -71,7 +71,7 @@ class IsingDataset(Dataset):
         self.total_prob_amps = self.dataset_len * self.ground_state_length
 
     def __len__(self):
-        return self.dataset_len
+        return self.dataset_len * self.ground_state_length
 
     def __getitem__(self, idx):
         """
@@ -92,6 +92,9 @@ class IsingDataset(Dataset):
                 The probability amplitudes
         """
 
+        if not torch.is_tensor(idx):
+            idx = torch.tensor(idx).reshape(-1)
+
         labels = self.ground_state_tensor.view(-1)[idx]
         basis_idx = torch.remainder(idx, self.ground_state_length)
         basis_states = self.basis[:, basis_idx]
@@ -99,7 +102,6 @@ class IsingDataset(Dataset):
         params = self.param_tensor[torch.tensor(param_idx)].unsqueeze(1)
 
         return basis_states, params, labels
-
 
 # class SlowTensor(torch.Tensor):
 #     def __init__(self, base_tensor: torch.tensor):
