@@ -19,6 +19,8 @@ from batch_ising_dataset import (
     IsingIterableDatasetSequential,
 )
 
+from torch.utils.data import RandomSampler, BatchSampler
+
 
 class Ising(Hamiltonian):
     def __init__(self, system_size, periodic=True, get_basis=False):
@@ -170,7 +172,7 @@ class Ising(Hamiltonian):
         data_dir_path: str,
         batch_size: int = 1000,
         samples_in_epoch=100,
-        sampling_type="random",
+        sampling_type="shuffled",
     ):
         """
         Given a directory path, searches for a file in the directory called
@@ -275,6 +277,15 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
             self.training_dataset = IsingIterableDatasetSequential(
                 self.dataset, batch_size, self.basis
             )
+        elif sampling_type == "shuffled":
+            generator = torch.Generator(device="cuda")
+            dataset = IsingDataset(self.dataset, self.basis)
+            random_sampler = RandomSampler(
+                dataset, replacement=False, generator=generator
+            )
+            batched_sampler = BatchSampler(random_sampler, batch_size, drop_last=False)
+            self.sampler = batched_sampler
+            self.training_dataset = dataset
         else:
             raise ValueError("Sampling type must be 'random' or 'sequential'")
 
