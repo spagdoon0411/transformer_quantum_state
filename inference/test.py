@@ -6,11 +6,11 @@ Created on Mon May 16 15:38:55 2022
 """
 
 
-from model import TransformerModel
-from model_utils import sample, compute_observable
-from Hamiltonian import Ising, XYZ
-from optimizer import Optimizer
-from evaluation import compute_E_sample, compute_magnetization
+from model.model import TransformerModel
+from model.model_utils import sample, compute_observable
+from hamiltonians.Hamiltonian import Ising, XYZ
+from optimizers.optimizer import Optimizer
+from inference.evaluation import compute_E_sample, compute_magnetization
 
 import os
 import time

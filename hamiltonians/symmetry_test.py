@@ -6,8 +6,8 @@ Determining the ground state symmetry of Hamiltonians
 import numpy as np
 import torch
 from scipy.sparse.linalg import eigsh
-from Hamiltonian import Ising, XXZ, XYZ, J1J2
-from symmetry import Symmetry_psi, Symmetry2D_psi
+from hamiltonians.Hamiltonian import Ising, XXZ, XYZ, J1J2
+from hamiltonians.symmetry import Symmetry_psi, Symmetry2D_psi
 
 pi = np.pi
 

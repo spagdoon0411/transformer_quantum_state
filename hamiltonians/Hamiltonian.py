@@ -20,9 +20,9 @@ from tenpy.networks.mps import MPS
 from tenpy.models.tf_ising import TFIChain
 from tenpy.models.spins import SpinModel
 from tenpy.algorithms import dmrg
-from Hamiltonian_utils import generate_spin_idx
-from model_utils import compute_observable
-from symmetry import Symmetry1D, Symmetry2D
+from hamiltonians.Hamiltonian_utils import generate_spin_idx
+from model.model_utils import compute_observable
+from hamiltonians.symmetry import Symmetry1D, Symmetry2D
 from tqdm import trange
 
 pi = np.pi

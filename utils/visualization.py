@@ -11,9 +11,9 @@ import numpy as np
 import torch
 import matplotlib
 import matplotlib.pyplot as plt
-import plt_config as plt_config
+import utils.plt_config as plt_config
 from scipy.signal import savgol_filter
-from Hamiltonian import Ising, XYZ
+from hamiltonians.Hamiltonian import Ising, XYZ
 
 color = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 

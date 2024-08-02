@@ -1,4 +1,4 @@
-from Hamiltonian import Hamiltonian
+from hamiltonians.Hamiltonian import Hamiltonian
 
 import os
 import numpy as np
@@ -10,10 +10,10 @@ import torch
 from tenpy.networks.mps import MPS
 from tenpy.models.spins import SpinModel
 from tenpy.algorithms import dmrg
-from Hamiltonian_utils import generate_spin_idx
-from symmetry import Symmetry1D, Symmetry2D
+from hamiltonians.Hamiltonian_utils import generate_spin_idx
+from hamiltonians.symmetry import Symmetry1D, Symmetry2D
 
-from batch_ising_dataset import (
+from datasets.batch_ising_dataset import (
     IsingRandomSampler,
     IsingDataset,
     IsingIterableDatasetSequential,

@@ -2,9 +2,9 @@ import torch
 import numpy as np
 import os
 import json
-from Ising import Ising
-from model import TransformerModel
-from optimizer_supervised_batches import Optimizer
+from hamiltonians.Ising import Ising
+from model.model import TransformerModel
+from optimizers.optimizer_supervised_batches import Optimizer
 
 
 def gpu_setup():

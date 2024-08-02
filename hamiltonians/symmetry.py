@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from Hamiltonian_utils import dec2bin, bin2dec
+from hamiltonians.Hamiltonian_utils import dec2bin, bin2dec
 
 
 def cyclic_permutation_idx(n):

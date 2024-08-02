@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn import functional as F
 from torch.nn.modules import Module
-from custom_modules import MultiheadAttention
+from model.custom_modules import MultiheadAttention
 from torch.nn.modules import Dropout
 from torch.nn.modules import Linear
 from torch.nn.modules import LayerNorm

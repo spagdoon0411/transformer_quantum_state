@@ -5,11 +5,11 @@ Created on Sun May 15 23:30:45 2022
 @author: Yuanhang Zhang
 """
 
-from model import TransformerModel
+from model.model import TransformerModel
 
 # from Hamiltonian import Ising, XYZ
-from Ising import Ising
-from optimizer import Optimizer
+from hamiltonians.Ising import Ising
+from optimizers.optimizer import Optimizer
 
 import os
 import numpy as np

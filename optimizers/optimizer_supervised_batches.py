@@ -12,11 +12,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model_utils import sample, compute_grad, compute_psi
-from evaluation import compute_E_sample, compute_magnetization
-from Hamiltonian import Hamiltonian
-import autograd_hacks
-from SR import SR
+from model.model_utils import sample, compute_grad, compute_psi
+from inference.evaluation import compute_E_sample, compute_magnetization
+from hamiltonians.Hamiltonian import Hamiltonian
+import model.autograd_hacks as autograd_hacks
+from model.SR import SR
 import itertools
 
 

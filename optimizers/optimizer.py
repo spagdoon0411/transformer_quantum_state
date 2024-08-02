@@ -12,10 +12,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model_utils import sample, compute_grad
-from evaluation import compute_E_sample, compute_magnetization
-import autograd_hacks
-from SR import SR
+from model.model_utils import sample, compute_grad
+from inference.evaluation import compute_E_sample, compute_magnetization
+import model.autograd_hacks as autograd_hacks
+from model.SR import SR
 
 
 class Optimizer:

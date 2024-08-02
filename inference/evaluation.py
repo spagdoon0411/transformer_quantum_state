@@ -1,5 +1,5 @@
 import torch
-from model_utils import sample, compute_observable, compute_psi
+from model.model_utils import sample, compute_observable, compute_psi
 
 
 @torch.no_grad()
