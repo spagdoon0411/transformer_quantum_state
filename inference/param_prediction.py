@@ -12,7 +12,7 @@ from model.model_utils import compute_psi, sample
 from hamiltonians.Hamiltonian import Ising
 
 # from distutils.version import StrictVersion
-
+#
 # assert StrictVersion(scipy.__version__) >= StrictVersion(
 #     "1.7.1"
 # ), "Scipy version must be >= 1.7.1"
