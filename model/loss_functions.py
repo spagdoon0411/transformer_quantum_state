@@ -35,7 +35,7 @@ def angular_loss_sq(angle, target, reduction="mean"):
         case _:
             raise ValueError("Invalid reduction type. Must be one of 'mean', 'sum', or 'none'.")
 
-def prob_phase_loss(self, log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5):
+def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5):
     """
     A composite loss function considering probabilities and phases. Treats
     probabilities as probability distributions and uses KL divergence to compare
@@ -62,7 +62,7 @@ def prob_phase_loss(self, log_probs, log_phases, psi_true, prob_weight=0.5, arg_
             The weight of the phase loss term
     """
 
-    if not math.isclose(prob_weight + arg_weight):
+    if not math.isclose(prob_weight + arg_weight, 1.0):
         raise ValueError("The sum of prob_weight and arg_weight must be 1.")
 
     # Moduli extracted from psi_true are not probabilities yet; square them
@@ -72,8 +72,8 @@ def prob_phase_loss(self, log_probs, log_phases, psi_true, prob_weight=0.5, arg_
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
     
-    phase_loss = angular_loss_sq(torch.exp(log_phases), phases_true)
-    prob_loss = KLDivLoss(reduction="batchmean")(log_probs, probs_true, log_target=False)
+    phase_loss = angular_loss_sq(log_phases, phases_true)
+    prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(log_probs, probs_true)
 
     # This loss is a superposition of the probability and phase losses, where the ratio 
     # is a hyperparameter. 
