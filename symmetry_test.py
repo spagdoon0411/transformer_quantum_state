@@ -24,7 +24,7 @@ H = XYZ(system_size, periodic=False)
 full_H = H.full_H(param)
 
 
-E, psi = eigsh(full_H, k=6, which='SA')
+E, psi = eigsh(full_H, k=6, which="SA")
 print(E)
 E_ground = E[0]
 
@@ -44,4 +44,4 @@ for psi_idx in range(4):
 
     E_symm_0 = psi_symm_0.conj().T @ full_H @ psi_symm_0
     E_symm_1 = psi_symm_1.conj().T @ full_H @ psi_symm_1
-    print('Reflection', E_symm_0, E_symm_1)
+    print("Reflection", E_symm_0, E_symm_1)

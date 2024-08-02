@@ -7,6 +7,11 @@ Created on Sun May 15 14:15:05 2022
 
 import os
 import numpy as np
+import pyarrow as pa
+import pandas as pd
+import json
+import math
+import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 import torch
@@ -57,6 +62,7 @@ class Hamiltonian:
         self.H = None
         self.symmetry = None
         self.n_dim = None
+        self.dataset = None
 
     def update_param(self, param):
         """
@@ -133,7 +139,78 @@ class Hamiltonian:
         self.psi_ground = psi_ground
         return E_ground
 
+    # def memoize(
+    #     self, param_range: torch.Tensor, param_step: torch.Tensor, directory: str
+    # ):
+    #     """
+    #     Precalculate ground state energies and wavefunctions for a range of parameters at
+    #     intervals specified by param_step. Save the result to a file with an automatically-generated
+    #     name (based on the Hamiltonian type, system size, parameter ranges, and parameter step sizes).
+    #     Will load files that match the specified parameters if they exist or will create them.
+
+    #     Parameters:
+    #     param_range : torch.Tensor - (n_param, 2)
+    #         The range of parameters to memoize (vertically-organized, with the first column
+    #         being the lower bounds and the second column being the upper bounds)
+    #     param_step : torch.Tensor - (n_param, )
+    #         The step sizes of the parameters to memoize, aligned with param_range's vertical dimension
+    #     directory : str
+    #         The path to the directory where the memoized datasets will be stored
+
+    #     Returns: None
+    #     """
+    #     raise NotImplementedError("Memoization of datasets is not implemented yet.")
+
+    # def retrieve_ground_states(
+    #     self,
+    #     param_range: torch.Tensor,
+    #     param_step: torch.Tensor,
+    #     directory: str,
+    #     as_dataframe: bool = True,
+    # ):
+    #     """
+    #     Load memoized ground state energies and wavefunctions from a file using its automatically
+    #     generated name as an identifier. See memoize.
+
+    #     Parameters:
+    #     param_range : torch.Tensor - (n_param, 2)
+    #         The range of parameters used in the memoization (vertically-organized, with the first column
+    #         being the lower bounds and the second column being the upper bounds)
+    #     param_step : torch.Tensor - (n_param, )
+    #         The step sizes of the parameters used in the memoization, aligned with param_range's vertical
+    #         dimension
+    #     directory : str
+    #         The path to the directory where the memoized datasets are stored
+    #     as_dataframe : bool
+    #         Whether to return the loaded data as a pandas DataFrame (True) or as a PyTorch dataset (False)
+
+    #     Returns:
+    #     dataset : pandas.DataFrame or torch.utils.data.Dataset
+    #         The memoized dataset, either as a DataFrame or as a PyTorch dataset
+    #     """
+
+    #     raise NotImplementedError(
+    #         "Retrieval of memoized datasets is not implemented yet."
+    #     )
+
     def calc_ground(self, param=None):
+        """
+        Calculate the ground state energy and wavefunction.
+
+        Parameters:
+        param : torch.Tensor - (n_param, )
+            The parameters of the Hamiltonian in the form expected by full_H
+
+        Returns:
+        E_ground : float
+            The ground state energy
+        psi_ground : np.ndarray
+            The ground state wave function in the Hilbert space basis
+        """
+
+        # TODO: load from file if available, otherwise calculate
+        # and store. Look into PyTorch's Dataset and Sampler classes.
+
         if param is None:
             full_Hamiltonian = self.full_H()
         else:
@@ -141,7 +218,10 @@ class Hamiltonian:
         [E_ground, psi_ground] = eigsh(full_Hamiltonian, k=1, which="SA")
         E_ground = E_ground[0]
         psi_ground = psi_ground[:, 0]
-        return E_ground, psi_ground
+        return E_ground, torch.tensor(psi_ground)
+
+    def retrieve_ground(self, param, system_size):
+        raise NotImplementedError("Override retrieve_ground in the child class")
 
     def DMRG(self):
         raise NotImplementedError
@@ -167,9 +247,12 @@ class Hamiltonian:
             samples[i], _ = psi.sample_measurements(norm_tol=1e-4)
         return samples
 
+    def load_dataset(self):
+        raise NotImplementedError("Override load_dataset in the child class")
+
 
 class Ising(Hamiltonian):
-    def __init__(self, system_size, periodic=True):
+    def __init__(self, system_size, periodic=True, generate_basis=False):
         super().__init__()
         self.system_size = torch.tensor(system_size).reshape(-1)
         self.n_dim = len(self.system_size)
@@ -191,6 +274,9 @@ class Ising(Hamiltonian):
             (["X"], [self.h], self.external_field),
         ]
 
+        if generate_basis:
+            self.basis = self.get_basis()
+
         # TODO: implement 2D symmetry
         assert self.n_dim == 1, "2D symmetry is not implemented yet"
         self.symmetry = Symmetry1D(self.n)
@@ -202,6 +288,9 @@ class Ising(Hamiltonian):
         # self.symmetry.add_symmetry('translation', self.momentum)
         # self.symmetry.add_symmetry('reflection', self.parity)
         # self.symmetry.add_symmetry('spin_inversion', self.Z2)
+
+        self.h_step = None
+        self.dataset = None
 
     def update_param(self, param):
         # param: (1, )
@@ -233,6 +322,13 @@ class Ising(Hamiltonian):
                     hX = sparse.kron(hX, I, format="csr")
             self.Hamiltonian = self.Hamiltonian + h * hX
         return self.Hamiltonian
+
+    def get_basis(self):
+        # TODO: citation?
+        basis = np.zeros((2**self.n, self.n), dtype=int)
+        for i in range(2**self.n):
+            basis[i] = np.array([int(b) for b in np.binary_repr(i, width=self.n)])
+        return torch.tensor(basis.T)
 
     def DMRG(self, param=None, verbose=False, conserve=None):
         # Tenpy has S_i = 0.5 sigma_i, mine doesn't have the 0.5
@@ -286,6 +382,122 @@ class Ising(Hamiltonian):
                 )
             )
         return E * 4, psi, M
+
+    def load_dataset(self, data_dir_path: str):
+        """
+        Given a directory path, searches for a file in the directory called
+        meta.json. Expects the meta.json file to contain the keys:
+        - h_min - a float
+        - h_max - a float
+        - h_step - a float
+        - N_list - a list of ints
+        - file_names - a list of strings
+
+        Loads the file corresponding to this Hamiltonian's system size
+        (self.n)--i.e., searches in the list to determine the index of the
+        system size in the N_list, then loads the corresponding file at that index
+        in the file_names list as a Pandas DataFrame. Expects the file to be in
+        the Arrow IPC (Feather2) format and expects the table to contain the columns:
+        - N - an int
+        - h - a float
+        - state - a list of floats
+
+        Sets this Hamiltonian's self.dataset attribute to the loaded dataset.
+
+        Precomputes a binary representation of the system's states as a PyTorch tensor
+        for passing into the model. This is stored in self.basis.
+
+        Produces a warning if the range of h values in the metadata file does not
+        match the range of h values in the Hamiltonian's param_range attribute.
+
+        Notes a self.h_step corresponding to the step size in the metadata file.
+
+        TODO: for large datsets, consider using PyArrow's memory mapping or Dask
+        DataFrames.
+
+        TODO: make parameter ranges more consistent across Hamiltonians.
+
+        Parameters:
+        data_dir_path: str
+            The path to the directory containing the meta.json file
+
+        Returns:
+        None
+        """
+
+        # Load the metadata file
+        metadata_path = os.path.join(data_dir_path, "meta.json")
+        metadata_file = open(metadata_path, "r")
+        metadata = json.load(metadata_file)
+
+        try:
+            idx = metadata["N_list"].index(self.n)
+        except ValueError:
+            raise ValueError(f"System size {self.n} not found in metadata file")
+
+        file_path = metadata["file_names"][idx]
+        mmap = pa.memory_map(file_path)
+        with mmap as source:
+            self.dataset = pa.ipc.open_file(source).read_pandas()
+
+        h_min = metadata["h_min"]
+        this_h_min = self.param_range[0].item()
+        h_max = metadata["h_max"]
+        this_h_max = self.param_range[1].item()
+        h_step = metadata["h_step"]
+
+        if h_min != self.param_range[0].item() or h_max != self.param_range[1].item():
+            warning = """Warning: h values in metadata file do not match Hamiltonian's param_range; \
+found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting param_range to match.""".format(
+                h_min, h_max, h_step, this_h_min, this_h_max
+            )
+
+            self.param_range = torch.tensor([[h_min], [h_max]])
+
+            print(warning)
+
+        self.h_step = h_step
+
+    def retrieve_ground(self, param, abs_tol=1e-5):
+        """
+        Given a parameter value and system size, retrieves the ground state as a PyTorch tensor--
+        possibly for use in supervised training.
+
+        Parameters:
+        param : float
+            The h-value to retrieve the ground state for. Must be in the range of the dataset.
+            NOTE: due to the way the dataset is constructed, floating point errors may cause
+            problems with parameter-based indexing here. np.isclose is used with a default
+            absolute tolerance of 1e-5 to mitigate this.
+        abs_tol : float
+            1e-5 by default. The absolute tolerance used in np.isclose to determine if an
+            input parameter value is close enough to a parameter value in the dataset to be
+            considered a match.
+
+        Returns:
+        energy: float
+            The ground state energy
+        state: torch.Tensor
+            The ground state wavefunction as a PyTorch tensor of shape (2**n, )
+        """
+
+        if self.dataset is None:
+            raise ValueError("Ground states not loaded yet. See load_dataset.")
+
+        # Find the rows close to the parameter value (within abs_tol)
+        h_matches = self.dataset[np.isclose(self.dataset["h"], param, atol=abs_tol)]
+        if h_matches.empty:
+            raise ValueError(f"No ground state found for h={param}")
+        elif len(h_matches) > 1:
+            raise ValueError(
+                f"Multiple ground states found for h={param}; using the first."
+            )
+
+        # Pick the first one to return
+        h_match = h_matches.iloc[0]
+        energy, state = h_match["energy"], h_match["state"]
+        state = torch.tensor(state)
+        return energy, state
 
     # def DMRG(self, param=None, verbose=False):
     #     # Adapted from tenpy examples
