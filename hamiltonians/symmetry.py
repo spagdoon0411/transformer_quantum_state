@@ -91,7 +91,7 @@ class Symmetry1D(Symmetry):
         self.permutation = torch.arange(n).view(1, n)
         self.phase = torch.ones(1)
 
-    # NOTE: author: Spandan - perhaps we'd want to selectively apply the reflection or
+    # NOTE (comment author: Spandan) - perhaps we'd want to selectively apply the reflection or
     # translation symmetries down the line and that's why they're not called in the __call__ method.
     # It might be neater to produce a call method that specifies symmetries with flags.
 
