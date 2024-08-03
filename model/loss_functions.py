@@ -3,11 +3,12 @@ import torch.functional as F
 from torch.nn import KLDivLoss
 import math
 
+
 def angular_loss_sq(angle, target, reduction="mean"):
     """
-    A loss function based on the distance between two angles with the 
+    A loss function based on the distance between two angles with the
     theta = theta + 2 * pi invariance, target-predicted exchange invariance,
-    and common phase shift invariance. Always positive. Normalized to be 
+    and common phase shift invariance. Always positive. Normalized to be
     between 0 and 1.
 
     Parameters:
@@ -25,8 +26,6 @@ def angular_loss_sq(angle, target, reduction="mean"):
     # Before normalization, the lso is between 0 and pi^2
     res = res / (torch.pi**2)
 
-    print("unreduced loss: ", res)
-
     match reduction:
         case "mean":
             return torch.mean(res)
@@ -35,20 +34,24 @@ def angular_loss_sq(angle, target, reduction="mean"):
         case "none":
             return res
         case _:
-            raise ValueError("Invalid reduction type. Must be one of 'mean', 'sum', or 'none'.")
-        
+            raise ValueError(
+                "Invalid reduction type. Must be one of 'mean', 'sum', or 'none'."
+            )
 
-def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=None):
+
+def prob_phase_loss(
+    log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=None
+):
     """
     A composite loss function considering probabilities and phases. Treats
     probabilities as probability distributions and uses KL divergence to compare
     the predicted distribution over basis states to the true distribution extracted
     from the ground state label.
 
-    NOTE: log_probs must be the probabilities associated with the wave function that 
-    the model predicts with a natural log broadcasted over each term. This is what 
-    the model outputs already. This is noted as preferable to linear scaling in the 
-    documentation for torch.nn.KLDivLoss. However, this function does not log-scale 
+    NOTE: log_probs must be the probabilities associated with the wave function that
+    the model predicts with a natural log broadcasted over each term. This is what
+    the model outputs already. This is noted as preferable to linear scaling in the
+    documentation for torch.nn.KLDivLoss. However, this function does not log-scale
     the target probabilities (that it extracts from psi_true); torch.nn.KLDivLoss
     provides an option log_target in {True, False} to address this.
 
@@ -64,38 +67,37 @@ def prob_phase_loss(log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight
         arg_weight: float
             The weight of the phase loss term
         degenerate: torch.Tensor
-            A boolean tensor with dimension (batch_size,) indicating whether the label 
+            A boolean tensor with dimension (batch_size,) indicating whether the label
             at each index is a degenerate ground state. If degenerate[i] is True, the
             phase loss will be a minimum over both the true phase and the true
-            phase plus pi. 
+            phase plus pi.
     """
 
     if not math.isclose(prob_weight + arg_weight, 1.0):
         raise ValueError("The sum of prob_weight and arg_weight must be 1.")
 
     # Moduli extracted from psi_true are not probabilities yet; square them
-    probs_true = torch.abs(psi_true).to(torch.float32)**2
+    probs_true = torch.abs(psi_true).to(torch.float32) ** 2
 
     # Phases extracted from psi_true are angles in -pi to pi; angular_loss_sq
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
 
-    this_state_loss = angular_loss_sq(log_phases, phases_true, reduction="none")
-    degen_state_loss = angular_loss_sq(log_phases, phases_true + torch.pi, reduction="none")
+    this_state_loss = angular_loss_sq(
+        (log_phases * 0.5).exp(), phases_true, reduction="none"
+    )
+    degen_state_loss = angular_loss_sq(
+        (log_phases * 0.5).exp(), phases_true + torch.pi, reduction="none"
+    )
 
     phase_loss = torch.where(
-        degenerate, 
-        torch.min(
-            this_state_loss, 
-            degen_state_loss
-        ),
-        this_state_loss
+        degenerate, torch.min(this_state_loss, degen_state_loss), this_state_loss
     ).mean()
 
-    prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(log_probs, probs_true)
+    prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(
+        log_probs, probs_true
+    )
 
-    print(prob_loss)
-
-    # This loss is a superposition of the probability and phase losses, where the ratio 
-    # is a hyperparameter. 
+    # This loss is a superposition of the probability and phase losses, where the ratio
+    # is a hyperparameter.
     return prob_weight * prob_loss + arg_weight * phase_loss
