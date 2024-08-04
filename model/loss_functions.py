@@ -21,7 +21,7 @@ def angular_loss_sq(angle, target, reduction="mean"):
 
     angle = torch.remainder(angle, 2 * torch.pi)
     target = torch.remainder(target, 2 * torch.pi)
-    res = angle - target
+    res = torch.abs(angle - target)
     res = torch.pow(torch.min(res, 2 * torch.pi - res), 2)
     # Before normalization, the lso is between 0 and pi^2
     res = res / (torch.pi**2)
