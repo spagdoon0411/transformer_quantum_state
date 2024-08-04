@@ -83,11 +83,9 @@ def prob_phase_loss(
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
 
-    this_state_loss = angular_loss_sq(
-        (log_phases * 0.5).exp(), phases_true, reduction="none"
-    )
+    this_state_loss = angular_loss_sq((log_phases * 0.5), phases_true, reduction="none")
     degen_state_loss = angular_loss_sq(
-        (log_phases * 0.5).exp(), phases_true + torch.pi, reduction="none"
+        (log_phases * 0.5), phases_true + torch.pi, reduction="none"
     )
 
     phase_loss = torch.where(
