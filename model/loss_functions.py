@@ -95,6 +95,8 @@ def prob_phase_loss(
         degenerate, torch.min(this_state_loss, degen_state_loss), this_state_loss
     ).mean()
 
+    # Note that the model output probabilities are log-scaled but that the labels from the dataset
+    # are not. This is an allowed configuration for torch.nn.KLDivLoss.
     prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(
         log_probs, probs_true
     )
