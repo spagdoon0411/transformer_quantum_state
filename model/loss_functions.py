@@ -59,9 +59,12 @@ def prob_phase_loss(
         log_probs: torch.Tensor
             The log probabilities of the model's predicted wave function
         log_phases: torch.Tensor
-            The log phases of the model's predicted wave function
+            The log phases (arguments, not exponential factors) of the model's
+            predicted wave function
         psi_true: torch.Tensor
-            The true wave function extracted from the ground state label
+            The true wave function extracted from the ground state label as a signed
+            complex tensor where a negative implies a phase of pi and a positive implies
+            a phase of 0.
         prob_weight: float
             The weight of the probability loss term
         arg_weight: float
