@@ -88,7 +88,8 @@ def prob_phase_loss(
     """
 
     if not math.isclose(prob_weight + arg_weight, 1.0):
-        raise ValueError("The sum of prob_weight and arg_weight must be 1.")
+        print(f"Warning: The sum of prob_weight and arg_weight is not 1.0.")
+        # raise ValueError("The sum of prob_weight and arg_weight must be 1.")
 
     # Moduli extracted from psi_true are not probabilities yet; square them
     probs_true = torch.abs(psi_true).to(torch.float32) ** 2
