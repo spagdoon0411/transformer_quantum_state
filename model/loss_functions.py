@@ -1,6 +1,6 @@
 import torch
 import torch.functional as F
-from torch.nn import KLDivLoss
+from torch.nn import KLDivLoss, MSELoss
 import math
 
 
@@ -40,7 +40,14 @@ def angular_loss_sq(angle, target, reduction="mean"):
 
 
 def prob_phase_loss(
-    log_probs, log_phases, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=None
+    log_probs,
+    log_phases,
+    psi_true,
+    prob_weight=0.5,
+    arg_weight=0.5,
+    degenerate=None,
+    writer=None,
+    writer_iter=None,
 ):
     """
     A composite loss function considering probabilities and phases. Treats
@@ -74,6 +81,10 @@ def prob_phase_loss(
             at each index is a degenerate ground state. If degenerate[i] is True, the
             phase loss will be a minimum over both the true phase and the true
             phase plus pi.
+        writer: torch.utils.tensorboard.SummaryWriter
+            A SummaryWriter object for logging the loss values to TensorBoard
+        writer_iter: int
+            The iteration number for logging to TensorBoard
     """
 
     if not math.isclose(prob_weight + arg_weight, 1.0):
@@ -97,9 +108,23 @@ def prob_phase_loss(
 
     # Note that the model output probabilities are log-scaled but that the labels from the dataset
     # are not. This is an allowed configuration for torch.nn.KLDivLoss.
-    prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(
-        log_probs, probs_true
-    )
+    # prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(
+    #     log_probs, probs_true
+    # )
+
+    prob_loss = MSELoss(reduction="mean")(torch.exp(log_probs), probs_true)
+
+    prob_loss_weighted = prob_weight * prob_loss
+    phase_loss_weighted = arg_weight * phase_loss
+
+    total_loss = prob_weight * prob_loss + arg_weight * phase_loss
+
+    if (writer is not None) and (writer_iter is not None):
+        writer.add_scalar("Loss/Probability", prob_loss, writer_iter)
+        writer.add_scalar("Loss/Probability_Weighed", prob_loss_weighted, writer_iter)
+        writer.add_scalar("Loss/Phase", phase_loss, writer_iter)
+        writer.add_scalar("Loss/Phase_Weighed", phase_loss_weighted, writer_iter)
+        writer.add_scalar("Loss/Total", total_loss, writer_iter)
 
     # This loss is a superposition of the probability and phase losses, where the ratio
     # is a hyperparameter.
