@@ -5,6 +5,7 @@ import json
 from hamiltonians.Ising import Ising
 from model.model import TransformerModel
 from optimizers.optimizer_supervised_batches import Optimizer
+from torch.utils.tensorboard import SummaryWriter
 
 
 def gpu_setup():
@@ -24,7 +25,8 @@ torch.set_default_dtype(torch.float32)
 
 system_sizes = torch.arange(15, 15 + 2, 2).reshape(-1, 1)
 Hamiltonians = [Ising(size, periodic=True, get_basis=True) for size in system_sizes]
-data_dir_path = os.path.join("TFIM_ground_states", "2024-08-02T12-12-55.238")
+# data_dir_path = os.path.join("TFIM_ground_states", "2024-08-02T12-12-55.238")
+data_dir_path = os.path.join("TFIM_ground_states", "h_0.6")
 for ham in Hamiltonians:
     ham.load_dataset(
         data_dir_path,
@@ -74,45 +76,31 @@ ising40 = Ising(
 )
 
 dmrg40_h_values = torch.linspace(0, 2, 101)
-oneidx = torch.where(dmrg40_h_values == 1.0)[0][0]
+oneidx = torch.where(dmrg40_h_values.isclose(torch.tensor(0.6)))[0][0]
+print(f"Investigating h = {0.6} at index {oneidx}")
 
 opt = Optimizer(testmodel, Hamiltonians, point_of_interest=point_of_interest)
 
+opt.optim = torch.optim.Adam(
+    opt.model.parameters(), lr=0.1, betas=(0.9, 0.98), eps=1e-9
+)
+
+writer = SummaryWriter("runs/h=0.6_trial15")
+
 opt.train(
-    epochs=5,
+    epochs=1000,
     start_iter=0,
-    monitor_params=torch.tensor([[1.0]]),
+    monitor_params=torch.tensor([[0.6]]),
     monitor_hamiltonians=[ising40],
     monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
+    writer=writer,
 )
 
 errors1 = torch.tensor(opt.E_errors_all)
 
-opt.train(
-    epochs=5,
-    start_iter=0,
-    monitor_params=torch.tensor([[1.0]]),
-    monitor_hamiltonians=[ising40],
-    monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
-)
-
-errors2 = torch.tensor(opt.E_errors_all)
-
-opt.train(
-    epochs=5,
-    start_iter=0,
-    monitor_params=torch.tensor([[1.0]]),
-    monitor_hamiltonians=[ising40],
-    monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
-)
-
-errors3 = torch.tensor(opt.E_errors_all)
-
 import matplotlib.pyplot as plt
 
 plt.plot(errors1.flatten().cpu().numpy(), label="errors1")
-plt.plot(errors2.flatten().cpu().numpy(), label="errors2")
-plt.plot(errors3.flatten().cpu().numpy(), label="errors3")
 plt.xlabel("Iteration")
 plt.ylabel("Epochs' Errors vs Iteration")
 plt.legend()
@@ -120,5 +108,4 @@ plt.legend()
 for i in range(1, 3):
     plt.axvline(x=i * errors1.shape[1], color="r", linestyle="--")
 
-plt.savefig("errors_vs_iteration.png")
-plt.show()
+plt.savefig("stable_h=0.6_trial15.png")
