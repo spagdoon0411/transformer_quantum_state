@@ -59,7 +59,7 @@ class Optimizer:
         # parameters in the same range, etc.).
 
         self.save_freq = 100
-        self.ckpt_freq = 10000
+        self.ckpt_freq = 100
         self.point_of_interest = point_of_interest
 
     # A schedule used for an adaptive learning rate
@@ -469,6 +469,12 @@ class Optimizer:
 
         self.E_errors_all = []
 
+        initial_energy = self.extract_energy_estimate(
+            monitor_hamiltonians[0], monitor_params[0]
+        )
+
+        print(f"Initial energy: {initial_energy}")
+
         for i in range(epochs):
             epoch_start = time.time()
 
@@ -542,10 +548,10 @@ class Optimizer:
                         f"Epoch {i} iter {iter} - Loss for system size {system_size} and h-range {param_min}-{param_max}: {loss.item()}"
                     )
 
-                    if True or iter % self.ckpt_freq == 0:
+                    if timestep_plotting_index % self.ckpt_freq == 0:
                         torch.save(
                             self.model.state_dict(),
-                            f"supervised_results/ckpt_{iter}_{save_str}.ckpt",
+                            f"supervised_results/ckpt_{timestep_plotting_index}_{save_str}.ckpt",
                         )
 
                     energy_start = time.time()
