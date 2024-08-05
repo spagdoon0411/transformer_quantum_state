@@ -6,6 +6,7 @@ from hamiltonians.Ising import Ising
 from model.model import TransformerModel
 from optimizers.optimizer_supervised_batches import Optimizer
 from torch.utils.tensorboard import SummaryWriter
+import pickle
 
 
 def gpu_setup():
@@ -17,21 +18,24 @@ def gpu_setup():
         torch_device = torch.device("cpu")
         print("GPU unavailable; using CPU")
 
-
 gpu_setup()
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.float32)
 
-system_sizes = torch.arange(15, 15 + 2, 2).reshape(-1, 1)
+system_sizes = torch.arange(10, 20 + 1, 2).reshape(-1, 1)
 Hamiltonians = [Ising(size, periodic=True, get_basis=True) for size in system_sizes]
 # data_dir_path = os.path.join("TFIM_ground_states", "2024-08-02T12-12-55.238")
 data_dir_path = os.path.join("TFIM_ground_states", "h_0.6")
+
+perc = (2**15 - 30000) / 2**15
+batch_size_dyn = lambda n: int(2**n * (1- perc))
+
 for ham in Hamiltonians:
     ham.load_dataset(
         data_dir_path,
-        batch_size=30000,
-        samples_in_epoch=100,
+        batch_size=batch_size_dyn(ham.n),
+        # samples_in_epoch=100,
         sampling_type="shuffled",
     )
 
@@ -82,30 +86,24 @@ print(f"Investigating h = {0.6} at index {oneidx}")
 opt = Optimizer(testmodel, Hamiltonians, point_of_interest=point_of_interest)
 
 opt.optim = torch.optim.Adam(
-    opt.model.parameters(), lr=0.1, betas=(0.9, 0.98), eps=1e-9
+    opt.model.parameters(), lr=0.5, betas=(0.9, 0.98), eps=1e-9
 )
 
-writer = SummaryWriter("runs/h=0.6_trial15")
+TRIAL_NUM = 32
+
+writer = SummaryWriter(f"runs/h=0.6_trial{TRIAL_NUM}")
 
 opt.train(
-    epochs=1000,
+    epochs=3000,
     start_iter=0,
     monitor_params=torch.tensor([[0.6]]),
     monitor_hamiltonians=[ising40],
     monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
     writer=writer,
+    prob_weight=10**6,
+    arg_weight=0.5
 )
 
 errors1 = torch.tensor(opt.E_errors_all)
 
-import matplotlib.pyplot as plt
-
-plt.plot(errors1.flatten().cpu().numpy(), label="errors1")
-plt.xlabel("Iteration")
-plt.ylabel("Epochs' Errors vs Iteration")
-plt.legend()
-
-for i in range(1, 3):
-    plt.axvline(x=i * errors1.shape[1], color="r", linestyle="--")
-
-plt.savefig("stable_h=0.6_trial15.png")
+pickle.dump(errors1, open(f"errors1_trial{TRIAL_NUM}.pkl", "wb"))
