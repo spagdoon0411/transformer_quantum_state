@@ -19,6 +19,10 @@ import model.autograd_hacks as autograd_hacks
 from model.SR import SR
 import itertools
 from model.loss_functions import prob_phase_loss
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from torch.utils.tensorboard import SummaryWriter
+
 
 class Optimizer:
     def __init__(self, model, Hamiltonians, point_of_interest=None):
@@ -239,7 +243,13 @@ class Optimizer:
         return itertools.product(*parameter_ranges)
 
     def show_energy_report(
-        self, monitor_params, monitor_hamiltonians, monitor_energies, E_errors
+        self,
+        monitor_params,
+        monitor_hamiltonians,
+        monitor_energies,
+        E_errors,
+        writer=None,
+        logging_iter=None,
     ):
         with torch.no_grad():
             for param in monitor_params:
@@ -249,6 +259,19 @@ class Optimizer:
                     relative_error = torch.abs((E_mean - E_ground) / E_ground)
 
                     E_errors.append(relative_error)
+
+                    if (writer is not None) and (logging_iter is not None):
+                        writer.add_scalar(
+                            f"Energy_Error/N={ham.system_size.item()}, h={param.item()}",
+                            relative_error,
+                            logging_iter,
+                        )
+                    elif (writer is not None) or (logging_iter is not None):
+                        print(
+                            "Warning: writer and logging_iter must be both None or both not None. Setting both to None."
+                        )
+                        writer = None
+                        logging_iter = None
 
                     print(
                         f"\tparam={param}, system_size={ham.system_size} - Relative Error: {relative_error}\n\t\tEnergy: {E_mean}, Variance: {E_var}, Real: {Er}, Imag: {Ei}"
@@ -289,11 +312,97 @@ class Optimizer:
         Ei = (E_mean.imag / H.n).detach().cpu().numpy()
 
         return E_mean, E_var, Er, Ei
-    
-    # Performs a mapping from one degenerate state to the other. Does not 
+
+    # Performs a mapping from one degenerate state to the other. Does not
     # account for the parameter range.
     def ising_degen(self, phases, probs):
         return (-phases, probs)
+
+    def plot_grad_flow(self, named_parameters, tensorboard_writer, step):
+        ave_grads = []
+        ave_weights = []
+        layers = []
+        for n, p in named_parameters:
+            if (p.requires_grad) and ("bias" not in n):
+                layers.append(n)
+                try:
+                    ave_grads.append(p.grad.abs().mean().item())
+                    tensorboard_writer.add_scalar(
+                        "gradient/" + n, p.grad.abs().mean().item(), global_step=step
+                    )
+
+                    ave_weights.append(p.abs().mean().item())
+                    tensorboard_writer.add_scalar(
+                        "weights/" + n, p.abs().mean().item(), global_step=step
+                    )
+
+                except:
+                    continue
+
+    def compute_psi_batch(
+        self,
+        model: nn.Module,
+        params,
+        samples,
+        system_size,
+        symmetry=None,
+        check_duplicates=False,
+    ):
+        """
+        Computes the wave function for a batch of samples.
+        Parameters:
+            model: nn.Module
+                The model to use to compute the wave function
+            samples: torch.Tensor
+                The samples to compute the wave function for
+            symmetry: str | None
+                The symmetry to use when computing the wave function
+            check_duplicates: bool
+                Whether to check for duplicates in the samples
+            params: torch.Tensor | None - (batch_size, param_dim)
+                The parameters to use when computing the wave function
+        """
+
+        if symmetry is not None:
+            samples, phase = symmetry(samples)
+            n_symm, n, batch0 = samples.shape
+            samples = samples.transpose(0, 1).reshape(n, -1)
+            params = params.repeat(n_symm, 1)  # TODO: check for many params
+
+        if check_duplicates:
+            samples_params = torch.vstack([samples, params.T])
+            samples_params, inv_idx = torch.unique(
+                samples_params, dim=1, return_inverse=True
+            )
+            samples = samples_params[:-1]
+            params = samples_params[-1].reshape(-1, 1)
+
+        n, batch = samples.shape
+        n_idx = torch.arange(n).reshape(n, 1)
+        batch_idx = torch.arange(batch).reshape(1, batch)
+        spin_idx = samples.to(torch.int64)
+
+        log_prob, log_phase = model.forward_batched(params, samples, system_size)
+
+        log_prob = log_prob[:-1]
+        log_phase = log_phase[:-1]
+
+        log_prob = log_prob[n_idx, batch_idx, spin_idx].sum(dim=0)
+        log_phase = log_phase[n_idx, batch_idx, spin_idx].sum(dim=0)
+
+        if check_duplicates:
+            log_prob = log_prob[inv_idx]
+            log_phase = log_phase[inv_idx]
+
+        if symmetry is not None:
+            log_prob = log_prob.reshape(n_symm, batch0)
+            log_phase = log_phase.reshape(n_symm, batch0)
+
+            log_phase = ((log_prob + 1j * log_phase) / 2).exp().mean(dim=0)
+            log_phase = log_phase.imag.atan2(log_phase.real) * 2  # (batch0, )
+            log_prob = log_prob.exp().mean(dim=0).log()  # (batch0, )
+
+        return log_prob, log_phase
 
     def train(
         self,
@@ -306,6 +415,7 @@ class Optimizer:
         start_iter=None,
         prob_weight=0.5,
         arg_weight=0.5,
+        writer: SummaryWriter = None,
     ):
         """
         Trains the model to replicate the parameter-and-spin-sequence to ground
@@ -332,6 +442,8 @@ class Optimizer:
                 The weight assigned to the phase loss term in the composite loss function
                 0.5 by default.
         """
+
+        timestep_plotting_index = 0
 
         name, embedding_size, n_head, n_layers = (
             type(self.Hamiltonians[0]).__name__,
@@ -376,12 +488,13 @@ class Optimizer:
 
                     psi_start = time.time()
 
-                    log_prob, log_phase = compute_psi(
+                    log_prob, log_phase = self.compute_psi_batch(
                         self.model,
+                        params,
                         basis_states,
-                        symmetry=None,  # H.symmetry,  # TODO: fix duplicate checking
-                        check_duplicate=False,
-                        params=params,  # NOTE: setting this puts compute_psi in to the new cross-J batch mode
+                        system_size,
+                        symmetry=H.symmetry,
+                        check_duplicates=True,
                     )
 
                     psi_end = time.time()
@@ -391,21 +504,39 @@ class Optimizer:
                     degenerate = params < 1
 
                     loss = prob_phase_loss(
-                        log_prob, log_phase, psi_true, prob_weight=0.5, arg_weight=0.5, degenerate=degenerate 
+                        log_prob,
+                        log_phase,
+                        psi_true,
+                        degenerate=degenerate,
+                        prob_weight=prob_weight,
+                        arg_weight=arg_weight,
+                        writer=writer,
+                        writer_iter=timestep_plotting_index,
                     )
 
                     loss_end = time.time()
 
-                    backprop_start = time.time()
-                    self.optim.zero_grad()
-                    loss.backward()
-                    self.optim.step()
-                    scheduler.step()
-                    backprop_end = time.time()
-
                     unique_params = torch.unique(params)
                     param_max = torch.max(unique_params)
                     param_min = torch.min(unique_params)
+
+                    backprop_start = time.time()
+                    self.optim.zero_grad()
+                    loss.backward()
+                    if writer is not None:
+                    #     writer.add_scalar(
+                    #         f"N={system_size}_loss",
+                    #         loss.item(),
+                    #         i,
+                    #     )
+                        self.plot_grad_flow(
+                            self.model.named_parameters(),
+                            writer,
+                            timestep_plotting_index,
+                        )
+                    self.optim.step()
+                    # scheduler.step()
+                    backprop_end = time.time()
 
                     print(
                         f"Epoch {i} iter {iter} - Loss for system size {system_size} and h-range {param_min}-{param_max}: {loss.item()}"
@@ -425,6 +556,8 @@ class Optimizer:
                             monitor_hamiltonians,
                             monitor_energies,
                             E_errors,
+                            writer,
+                            logging_iter=timestep_plotting_index,
                         )
 
                     energy_end = time.time()
@@ -434,6 +567,7 @@ class Optimizer:
                     )
 
                     iter += 1
+                    timestep_plotting_index += 1
 
                 ham_end = time.time()
                 print(
