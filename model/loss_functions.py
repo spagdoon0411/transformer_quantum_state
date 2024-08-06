@@ -38,6 +38,21 @@ def angular_loss_sq(angle, target, reduction="mean"):
                 "Invalid reduction type. Must be one of 'mean', 'sum', or 'none'."
             )
 
+def angular_loss_smooth(angle, target, reduction="mean"):
+
+    loss_broadcasted = 1 - torch.cos(angle - target)
+
+    match reduction:
+        case "mean":
+            return torch.mean(loss_broadcasted)
+        case "sum":
+            return torch.sum(loss_broadcasted)
+        case "none":
+            return loss_broadcasted
+        case _:
+            raise ValueError(
+                "Invalid reduction type. Must be one of 'mean', 'sum', or 'none'."
+            )
 
 def prob_phase_loss(
     log_probs,
@@ -98,8 +113,8 @@ def prob_phase_loss(
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
 
-    this_state_loss = angular_loss_sq((log_phases * 0.5), phases_true, reduction="none")
-    degen_state_loss = angular_loss_sq(
+    this_state_loss = angular_loss_smooth((log_phases * 0.5), phases_true, reduction="none")
+    degen_state_loss = angular_loss_smooth(
         (log_phases * 0.5), phases_true + torch.pi, reduction="none"
     )
 
