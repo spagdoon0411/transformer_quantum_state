@@ -52,7 +52,7 @@ end
 # TODO: does type conversion from Int64 to Float64 have overhead?
 @inline
 function specialize_H_threaded(H1::SparseMatrixCSC{Float64,Int64}, H2::SparseMatrixCSC{Float64,Int64}, h::Float64)
-    H1 + h * H2 # TODO: is this operation optimized by Julia via OpenBLAS?
+    H1 - h * H2 # TODO: is this operation optimized by Julia via OpenBLAS?
 end
 
 # # "Specializes" a base TFIM Hamiltonian to a specific value of h
@@ -69,19 +69,17 @@ function ground_state(H)
     return energies[1], states[:, 1]
 end
 
-h_min = 0.5
-h_max = 1.5
-h_step = 0.01
 N_min = 2
 N_max = 20
 N_step = 1
 Nrange = N_min:N_step:N_max
-hrange = h_min:h_step:h_max
+# hrange = h_min:h_step:h_max
 
 top_dataset_dir = "TFIM_ground_states"
 
 timestamp = replace(string(Dates.now()), ":" => "-")
-this_dataset_dir = "$timestamp"
+# this_dataset_dir = "$timestamp"
+this_dataset_dir = "h_windows_2"
 
 table_dir = joinpath(top_dataset_dir, this_dataset_dir)
 mkpath(table_dir)
@@ -98,7 +96,19 @@ for N in Nrange # TODO: allocate threads more explicitly
 
     println("Switching to N = $N")
     @time H1, H2 = TransverseFieldIsing_sparse_threaded_base(N=N)
-    for h in hrange
+    for h in 0.5:0.2:0.7
+        println("N = $N, h = $h")
+        @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
+        push!(ground_state_df, (N, h, energy, state))
+    end
+
+    for h in 0.9:0.2:1.1
+        println("N = $N, h = $h")
+        @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
+        push!(ground_state_df, (N, h, energy, state))
+    end
+
+    for h in 1.3:0.2:1.5
         println("N = $N, h = $h")
         @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
         push!(ground_state_df, (N, h, energy, state))
@@ -115,9 +125,9 @@ meta_path = joinpath(table_dir, "meta.json")
 meta_file = open(meta_path, "w")
 meta = Dict(
     "N_list" => N_list,
-    "h_min" => h_min,
-    "h_max" => h_max,
-    "h_step" => h_step,
+    "h_min" => 0.5,
+    "h_max" => 1.5,
+    "h_step" => -1,
     "file_names" => file_names
 )
 JSON.print(meta_file, meta)
