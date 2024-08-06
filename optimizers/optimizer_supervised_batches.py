@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import random
 
 from model.model_utils import sample, compute_grad, compute_psi
 from inference.evaluation import compute_E_sample, compute_magnetization
@@ -473,7 +474,9 @@ class Optimizer:
             monitor_hamiltonians[0], monitor_params[0]
         )
 
-        print(f"Initial energy: {initial_energy}")
+        initial_relative_error = torch.abs((initial_energy[0] - monitor_energies[0]) / monitor_energies[0])
+
+        print(f"Initial energy error: {initial_relative_error}")
 
         for i in range(epochs):
             epoch_start = time.time()
@@ -481,6 +484,7 @@ class Optimizer:
             E_errors = []
 
             iter = 0
+            random.shuffle(self.Hamiltonians)
             for H in self.Hamiltonians:
                 ham_start = time.time()
                 system_size = H.system_size
