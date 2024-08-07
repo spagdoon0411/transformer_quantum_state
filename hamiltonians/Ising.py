@@ -12,6 +12,7 @@ from tenpy.models.spins import SpinModel
 from tenpy.algorithms import dmrg
 from hamiltonians.Hamiltonian_utils import generate_spin_idx
 from hamiltonians.symmetry import Symmetry1D, Symmetry2D
+from numpy.lib.format import open_memmap
 
 from datasets.batch_ising_dataset import (
     IsingRandomSampler,
@@ -19,7 +20,9 @@ from datasets.batch_ising_dataset import (
     IsingIterableDatasetSequential,
 )
 
-from torch.utils.data import RandomSampler, BatchSampler
+from datasets.ising_memmap import ProbabilityAmplitudeDataset
+
+from torch.utils.data import RandomSampler, BatchSampler, DataLoader
 
 pi = np.pi
 X = sparse.csr_matrix(np.array([[0, 1], [1, 0]], dtype=np.float64))
@@ -174,6 +177,45 @@ class Ising(Hamiltonian):
                 )
             )
         return E * 4, psi, M
+    
+    def load_mmap(
+        self,
+        mmap_dir="mmap_data",
+        batch_size=1000,
+    ):
+        """
+        Looks for the meta.json file with keys:
+        - num_samples
+        - basis_memmap_dir
+        - parameter_memmap_dir
+        - ground_memmap_dir
+
+        Loads the NumPy array files corresponding to the basis, parameters, and ground states
+        from those directores and produces a ProbabilityAmplitudeDataset that provides
+        shuffled samples from the memory maps for training.
+        """
+        metadata_path = os.path.join(mmap_dir, "meta.json")
+        with open(metadata_path, "r") as metadata_file:
+            metadata = json.load(metadata_file)
+        
+        basis_path = os.path.join(mmap_dir, metadata["basis_memmap_dir"], f"basis_{self.n}.npy")
+        param_path = os.path.join(mmap_dir, metadata["parameter_memmap_dir"], f"param_{self.n}.npy")
+        ground_state_path = os.path.join(mmap_dir, metadata["ground_memmap_dir"], f"ground_{self.n}.npy")
+        num_samples = metadata["num_samples"]
+
+        basis = open_memmap(basis_path, dtype=np.int32, mode="r", shape=(self.n, 2**self.n))
+        parameters = open_memmap(param_path, dtype=np.float64, mode="r", shape=(1, num_samples))
+        ground_states = open_memmap(ground_state_path, dtype=np.float64, mode="r", shape=(num_samples, 2**self.n))
+        dataset = ProbabilityAmplitudeDataset(basis, parameters, ground_states)
+
+        self.training_dataset = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            collate_fn=dataset.prob_amp_collate,
+            prefetch_factor=2,
+            num_workers=4,
+            shuffle=True,
+        )
 
     def load_dataset(
         self,
@@ -294,6 +336,7 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
             batched_sampler = BatchSampler(random_sampler, batch_size, drop_last=False)
             self.sampler = batched_sampler
             self.training_dataset = dataset
+
         else:
             raise ValueError("Sampling type must be 'random' or 'sequential'")
 
