@@ -491,8 +491,8 @@ class Optimizer:
                 dataset = H.training_dataset
                 sampler = H.sampler
 
-                for batch_idx in sampler:
-                    basis_states, params, psi_true = dataset[batch_idx]
+                for sample_idx in sampler:
+                    basis_states, params, psi_true = dataset[sample_idx]
 
                     self.model.set_param(system_size=system_size, param=None)
 
