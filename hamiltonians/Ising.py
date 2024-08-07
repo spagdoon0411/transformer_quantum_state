@@ -180,6 +180,7 @@ class Ising(Hamiltonian):
     
     def load_mmap(
         self,
+        collate_fn,
         mmap_dir="mmap_data",
         batch_size=1000,
     ):
@@ -208,14 +209,21 @@ class Ising(Hamiltonian):
         ground_states = open_memmap(ground_state_path, dtype=np.float64, mode="r", shape=(num_samples, 2**self.n))
         dataset = ProbabilityAmplitudeDataset(basis, parameters, ground_states)
 
+        # self.sampler = BatchSampler(RandomSampler(dataset, replacement=False, generator=torch.Generator(device="cuda")), batch_size, drop_last=False)
+        # self.training_dataset = dataset
+
         self.training_dataset = DataLoader(
             dataset,
             batch_size=batch_size,
-            collate_fn=dataset.prob_amp_collate,
+            collate_fn=collate_fn,
             prefetch_factor=2,
-            num_workers=4,
+            num_workers=1,
             shuffle=True,
+            generator=torch.Generator(device="cuda"),
+            pin_memory=True
         )
+        
+        self.underlying = dataset
 
     def load_dataset(
         self,
