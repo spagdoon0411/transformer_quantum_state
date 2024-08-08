@@ -335,7 +335,6 @@ class TransformerModel(nn.Module):
         amp = F.log_softmax(self.amp_head(psi_output), dim=-1)
 
         if compute_phase:
-            # TODO: is this being applied to the right dimension?
             phase = self.softsign(self.phase_head(psi_output))
 
         return [amp, phase]
