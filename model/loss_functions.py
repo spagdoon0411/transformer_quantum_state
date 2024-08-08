@@ -142,6 +142,4 @@ def prob_phase_loss(
         ham_loss_dict[f"{ham_loss_dict_key}_phase_loss_weighted"] = phase_loss_weighted
         ham_loss_dict[f"{ham_loss_dict_key}_total_loss"] = total_loss
 
-    # This loss is a superposition of the probability and phase losses, where the ratio
-    # is a hyperparameter.
     return prob_weight * prob_loss + arg_weight * phase_loss
