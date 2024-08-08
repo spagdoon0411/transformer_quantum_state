@@ -1,8 +1,5 @@
 import torch
-import torch.functional as F
-from torch.nn import KLDivLoss, MSELoss
-import math
-
+from torch.nn import MSELoss
 
 def angular_loss_sq(angle, target, reduction="mean"):
     """
@@ -123,12 +120,6 @@ def prob_phase_loss(
     phase_loss = torch.where(
         degenerate, torch.min(this_state_loss, degen_state_loss), this_state_loss
     ).mean()
-
-    # Note that the model output probabilities are log-scaled but that the labels from the dataset
-    # are not. This is an allowed configuration for torch.nn.KLDivLoss.
-    # prob_loss = KLDivLoss(log_target=False, reduction="batchmean")(
-    #     log_probs, probs_true
-    # )
 
     prob_loss = MSELoss(reduction="mean")(torch.exp(log_probs), probs_true)
 
