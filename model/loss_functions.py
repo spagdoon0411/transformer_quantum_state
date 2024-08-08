@@ -65,6 +65,8 @@ def prob_phase_loss(
     degenerate=None,
     writer=None,
     writer_iter=None,
+    ham_loss_dict=None,
+    ham_loss_dict_key=None
 ):
     """
     A composite loss function considering probabilities and phases. Treats
@@ -141,6 +143,13 @@ def prob_phase_loss(
         writer.add_scalar("Loss/Phase", phase_loss, writer_iter)
         writer.add_scalar("Loss/Phase_Weighed", phase_loss_weighted, writer_iter)
         writer.add_scalar("Loss/Total", total_loss, writer_iter)
+
+    if (ham_loss_dict is not None) and (ham_loss_dict_key is not None):
+        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss"] = prob_loss
+        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss_weighted"] = prob_loss_weighted
+        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss"] = phase_loss
+        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss_weighted"] = phase_loss_weighted
+        ham_loss_dict[f"{ham_loss_dict_key}_total_loss"] = total_loss
 
     # This loss is a superposition of the probability and phase losses, where the ratio
     # is a hyperparameter.
