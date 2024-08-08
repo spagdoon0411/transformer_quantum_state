@@ -79,7 +79,7 @@ top_dataset_dir = "/home/spandan/Projects/transformer_quantum_state/TFIM_ground_
 
 timestamp = replace(string(Dates.now()), ":" => "-")
 # this_dataset_dir = "$timestamp"
-this_dataset_dir = "h_0.6_new_correct"
+this_dataset_dir = "h_windows"
 
 table_dir = joinpath(top_dataset_dir, this_dataset_dir)
 mkpath(table_dir)
