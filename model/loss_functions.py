@@ -38,6 +38,7 @@ def angular_loss_sq(angle, target, reduction="mean"):
                 "Invalid reduction type. Must be one of 'mean', 'sum', or 'none'."
             )
 
+
 def angular_loss_smooth(angle, target, reduction="mean"):
 
     loss_broadcasted = 1 - torch.cos(angle - target)
@@ -53,6 +54,7 @@ def angular_loss_smooth(angle, target, reduction="mean"):
             raise ValueError(
                 "Invalid reduction type. Must be one of 'mean', 'sum', or 'none'."
             )
+
 
 def prob_phase_loss(
     log_probs,
@@ -102,10 +104,6 @@ def prob_phase_loss(
             The iteration number for logging to TensorBoard
     """
 
-    if not math.isclose(prob_weight + arg_weight, 1.0):
-        print(f"Warning: The sum of prob_weight and arg_weight is not 1.0.")
-        # raise ValueError("The sum of prob_weight and arg_weight must be 1.")
-
     # Moduli extracted from psi_true are not probabilities yet; square them
     probs_true = torch.abs(psi_true).to(torch.float32) ** 2
 
@@ -113,9 +111,11 @@ def prob_phase_loss(
     # will normalize to 0 to 2 * pi.
     phases_true = torch.angle(psi_true).to(torch.float32)
 
-    this_state_loss = angular_loss_smooth((log_phases * 0.5), phases_true, reduction="none")
+    log_phases = log_phases * 0.5
+
+    this_state_loss = angular_loss_smooth(log_phases, phases_true, reduction="none")
     degen_state_loss = angular_loss_smooth(
-        (log_phases * 0.5), phases_true + torch.pi, reduction="none"
+        log_phases, phases_true + torch.pi, reduction="none"
     )
 
     phase_loss = torch.where(
