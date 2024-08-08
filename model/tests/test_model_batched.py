@@ -5,6 +5,14 @@ from hamiltonians.Ising import Ising
 import os
 import torch
 import math
+from model.model_utils import (
+    sample,
+    compute_psi,
+    compute_grad,
+    compute_observable,
+    compute_flip,
+    compute_phase,
+)
 
 
 import unittest
@@ -46,6 +54,11 @@ class TestEquivalentInitialization(unittest.TestCase):
             minibatch=None,
         )
 
+        compat_dict = {
+            "system_sizes": system_sizes,
+            "param_range": self.old.param_range,
+        }
+
         self.new = TransformerModelBatched(
             n_dim=system_sizes.shape[1],
             param_dim=param_dim,
@@ -57,6 +70,7 @@ class TestEquivalentInitialization(unittest.TestCase):
             dropout_encoding=dropout,
             dropout_transformer=dropout,
             chunk_size=None,
+            compat_dict=compat_dict,
         )
 
         self.old.cuda()
@@ -89,7 +103,7 @@ class TestEquivalentInitialization(unittest.TestCase):
         self.old.pos_encoder.pe = self.new.pos_encoder.pe
 
         old_output = self.old(spin_chains)
-        new_output = self.new(
+        new_output = self.new.forward_batched(
             params=new_param,
             spins=spin_chains,
             system_size=new_system_size,
@@ -182,7 +196,7 @@ class TestEquivalentInitialization(unittest.TestCase):
 
         # Run inference using the new model with each parameter corresponding to
         # one of the three spin chains, in order.
-        new_log_amp, new_log_phase = self.new(
+        new_log_amp, new_log_phase = self.new.forward_batched(
             params, spins, torch.tensor([10]), compute_phase=True
         )
 
@@ -214,6 +228,94 @@ class TestEquivalentInitialization(unittest.TestCase):
             torch.allclose(old_log_phase, new_log_phase),
             "Phases are not the same between models",
         )
+
+    def test_old_model_compatibility(self):
+        """
+        Ensure that the new model's classic interface produces the same forward outputs as the
+        old model.
+        """
+
+        results_dir = "results"
+        paper_checkpoint_name = "ckpt_100000_Ising_32_8_8_0.ckpt"
+        paper_checkpoint_path = os.path.join(results_dir, paper_checkpoint_name)
+        checkpoint = torch.load(paper_checkpoint_path)
+
+        self.old.load_state_dict(checkpoint)
+        self.new.load_state_dict(checkpoint)
+
+        # TODO: why do we have to force positional encoding reconciliation?
+        self.new.pos_encoder.pe = self.old.pos_encoder.pe
+
+        n = 10
+        batch_size = 100
+        spin_chains = torch.randint(0, 2, (n, batch_size))
+
+        self.old.set_param(system_size=torch.tensor([n]), param=torch.tensor([1.3]))
+        self.new.set_param(system_size=torch.tensor([n]), param=torch.tensor([1.3]))
+
+        # Verify regular forward pass
+        old_output = self.old(spin_chains)
+        new_output = self.new(spin_chains)
+
+        old_amps, old_phases = old_output
+        new_amps, new_phases = new_output
+
+        self.assertTrue(torch.allclose(old_amps, new_amps))
+        self.assertTrue(torch.allclose(old_phases, new_phases))
+
+        test_ising = Ising(torch.tensor([n]), periodic=False, get_basis=False)
+
+        # Verify equality of functions in model_utils
+        old_log_amps, old_log_phases = compute_psi(
+            self.old, spin_chains, symmetry=test_ising.symmetry
+        )
+
+        new_log_amps, new_log_phases = compute_psi(
+            self.new, spin_chains, symmetry=test_ising.symmetry
+        )
+
+        self.assertTrue(torch.allclose(old_log_amps, new_log_amps))
+        self.assertTrue(torch.allclose(old_log_phases, new_log_phases))
+
+        torch.manual_seed(0)
+        old_samples, old_weight = sample(
+            self.old, batch=1000, max_unique=100, symmetry=test_ising.symmetry
+        )
+
+        torch.manual_seed(0)
+        new_samples, new_weight = sample(
+            self.new, batch=1000, max_unique=100, symmetry=test_ising.symmetry
+        )
+
+        self.assertTrue(torch.allclose(old_samples, new_samples))
+        self.assertTrue(torch.allclose(old_weight, new_weight))
+
+        E_old = test_ising.Eloc(old_samples, old_weight, self.old, use_symmetry=True)
+        E_new = test_ising.Eloc(new_samples, new_weight, self.new, use_symmetry=True)
+
+        self.assertTrue(torch.allclose(E_old, E_new))
+
+        old_loss, old_log_amp, old_log_phase = compute_grad(
+            self.old,
+            old_samples,
+            sample_weight=old_weight,
+            Eloc=E_old,
+            symmetry=test_ising.symmetry,
+        )
+
+        new_loss, new_log_amp, new_log_phase = compute_grad(
+            self.new,
+            new_samples,
+            sample_weight=new_weight,
+            Eloc=E_new,
+            symmetry=test_ising.symmetry,
+        )
+
+        self.assertTrue(torch.allclose(old_loss, new_loss))
+        self.assertTrue(torch.allclose(old_log_amp, new_log_amp))
+        self.assertTrue(torch.allclose(old_log_phase, new_log_phase))
+
+        # TODO: continue checking the rest of the functions in model_utils
 
 
 if __name__ == "__main__":
