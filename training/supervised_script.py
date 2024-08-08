@@ -92,21 +92,23 @@ dmrg40_h_values = torch.linspace(0, 2, 101)
 oneidx = torch.where(dmrg40_h_values.isclose(torch.tensor(0.6)))[0][0]
 print(f"Investigating h = {0.6} at index {oneidx}")
 
+# Recommended lr range: 1e-9 to 1e-2
 opt = Optimizer(model, Hamiltonians, lr=1e-7, beta1=0.9, beta2=0.98, point_of_interest=point_of_interest)
 
-TRIAL_NUM = 70
+TRIAL_NUM = 72
 
-writer = SummaryWriter(f"runs/h=0.6_trial{TRIAL_NUM}")
+writer = SummaryWriter(f"runs/run{TRIAL_NUM}")
 
 opt.train(
-    epochs=3000,
-    start_iter=0,
+    epochs=30000,
     monitor_params=torch.tensor([[0.6]]),
     monitor_hamiltonians=[ising40],
     monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
     writer=writer,
     prob_weight=10**6,
     arg_weight=0.5,
+    run_num=TRIAL_NUM,
+    energy_error_frequency=10 # Number of batches after which energy error estimate is calculated
 )
 
 errors1 = torch.tensor(opt.E_errors_all)
