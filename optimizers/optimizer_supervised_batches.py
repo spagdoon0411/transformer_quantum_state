@@ -32,7 +32,7 @@ import tempfile
 
 
 class Optimizer:
-    def __init__(self, model, Hamiltonians, point_of_interest=None):
+    def __init__(self, model, Hamiltonians, lr=1e-7, beta1=0.9, beta2=0.98, point_of_interest=None):
         # Transformer model to optimize
         self.model = model
 
@@ -49,7 +49,7 @@ class Optimizer:
         # self.loss_fn = nn.MSELoss()
 
         self.optim = torch.optim.Adam(
-            self.model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9
+            self.model.parameters(), lr=lr, betas=(beta1, beta2), eps=1e-9
         )
 
         # the following is for per-layer stochastic reconfiguration
@@ -283,13 +283,6 @@ class Optimizer:
         save_str = (
             f"{name}_{embedding_size}_{n_head}_{n_layers}_{ensemble_id}_supervised"
         )
-
-        # scheduler = torch.optim.lr_scheduler.LambdaLR(
-        #     self.optim,
-        #     lambda step: self.lr_schedule(
-        #         step, self.model.embedding_size, start_step=start_iter
-        #     ),
-        # )
 
         self.E_errors_all = []
 
