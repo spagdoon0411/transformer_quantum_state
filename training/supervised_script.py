@@ -7,21 +7,9 @@ from model.model_batched import TransformerModel
 from optimizers.optimizer_supervised_batches import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 import pickle
+from cuda_setup import cuda_setup
 
-
-def gpu_setup():
-    # Setup for PyTorch:
-    if torch.cuda.is_available():
-        torch_device = torch.device("cuda")
-        print("PyTorch is using GPU {}".format(torch.cuda.current_device()))
-    else:
-        torch_device = torch.device("cpu")
-        print("GPU unavailable; using CPU")
-
-
-gpu_setup()
-
-torch.set_default_device("cuda")
+cuda_setup()
 torch.set_default_dtype(torch.float32)
 
 system_sizes = torch.arange(15, 15 + 1, 1).reshape(-1, 1)
@@ -95,7 +83,7 @@ print(f"Investigating h = {0.6} at index {oneidx}")
 # Recommended lr range: 1e-9 to 1e-2
 opt = Optimizer(model, Hamiltonians, lr=1e-7, beta1=0.9, beta2=0.98, point_of_interest=point_of_interest)
 
-TRIAL_NUM = 72
+TRIAL_NUM = 74
 
 writer = SummaryWriter(f"runs/run{TRIAL_NUM}")
 
