@@ -18,25 +18,24 @@ def gpu_setup():
         torch_device = torch.device("cpu")
         print("GPU unavailable; using CPU")
 
+
 gpu_setup()
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.float32)
 
-system_sizes = torch.arange(10, 20 + 1, 2).reshape(-1, 1)
+system_sizes = torch.arange(10, 15 + 1, 2).reshape(-1, 1)
 Hamiltonians = [Ising(size, periodic=True, get_basis=True) for size in system_sizes]
 # data_dir_path = os.path.join("TFIM_ground_states", "2024-08-02T12-12-55.238")
 data_dir_path = os.path.join("TFIM_ground_states", "h_0.6")
 
 perc = (2**15 - 30000) / 2**15
-batch_size_dyn = lambda n: int(2**n * (1- perc))
+batch_size_dyn = lambda n: int(2**n * (1 - perc))
 
 for ham in Hamiltonians:
     ham.load_dataset(
         data_dir_path,
         batch_size=batch_size_dyn(ham.n),
-        # samples_in_epoch=100,
-        sampling_type="shuffled",
     )
 
 param_dim = Hamiltonians[0].param_dim
@@ -89,7 +88,7 @@ opt.optim = torch.optim.Adam(
     opt.model.parameters(), lr=0.5, betas=(0.9, 0.98), eps=1e-9
 )
 
-TRIAL_NUM = 32
+TRIAL_NUM = 53
 
 writer = SummaryWriter(f"runs/h=0.6_trial{TRIAL_NUM}")
 
@@ -101,7 +100,7 @@ opt.train(
     monitor_energies=torch.tensor([[dmrg40[oneidx]]]),
     writer=writer,
     prob_weight=10**6,
-    arg_weight=0.5
+    arg_weight=0.5,
 )
 
 errors1 = torch.tensor(opt.E_errors_all)
