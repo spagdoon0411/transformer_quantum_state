@@ -6,6 +6,7 @@ from model.pos_encoding import TQSPositionalEncoding1D, TQSPositionalEncoding2D
 from jaxtyping import Float
 from model.custom_transformer_layer import TransformerEncoderLayer
 from torch.nn import TransformerEncoder
+import numpy as np
 
 
 class TransformerModel(nn.Module):
@@ -18,9 +19,11 @@ class TransformerModel(nn.Module):
         n_hid: int,
         n_layers: int,
         possible_spin_vals: int,
+        compat_dict: dict = None,
         dropout_encoding: float = 0,
         dropout_transformer: float = 0,
         chunk_size: int | None = None,
+        minibatch: int | None = 10000,
     ):
         """
         size_dim: int
@@ -43,6 +46,11 @@ class TransformerModel(nn.Module):
         possible_spin_vals: int
             The number of states a single site can be in. In the case of spin-1/2 Fermions,
             this is 2.
+        compat_dict: dict | None
+            A dictionary containing keys "system_sizes", "param_range", used for compatibility
+            with the old model behavior but not used in the new forward batching behavior
+            (which takes a tensor of parameters and a system size in its forward pass). If None,
+            the model will not be compatible with the old behavior.
         dropout_encoding: float
             The dropout rate used after position encoding is applied to the initial site
             embedding and before the transformer blocks are applied.
@@ -53,6 +61,8 @@ class TransformerModel(nn.Module):
             inference. Note that this is not a batch size used during training; it is
             used entirely inside of a forward pass, and computation graphs will be stored
             for each chunk simultaneously and backpropagated through together.
+        minibatch: int | None
+            Only considered when using forward_classic.
         """
 
         super(TransformerModel, self).__init__()
@@ -70,6 +80,16 @@ class TransformerModel(nn.Module):
         self.n_dim: int = n_dim
         self.param_dim: int = param_dim
         self.possible_spin_vals: int = possible_spin_vals
+
+        # Variables held for backwards-compatibility with the classic forward pass
+        # and classic model behavior
+        if compat_dict is not None:
+            self.system_sizes = compat_dict["system_sizes"]
+            self.system_size = None
+            self.param_range = compat_dict["param_range"]
+            self.param = None
+            self.minibatch = minibatch
+            self.phys_dim = self.possible_spin_vals
 
         # The dimension of the encoding space that parameters and spins are represented
         # in prior to being fed into any trainable layers.
@@ -171,6 +191,25 @@ class TransformerModel(nn.Module):
 
         return prefix_encoding
 
+    def set_param(self, system_size=None, param=None):
+        """
+        Kept for compatibility with the old model behavior. Does not affect the new forward
+        pass.
+        """
+        n_size = self.system_sizes.shape[0]
+        size_idx = torch.randint(n_size, [])
+        if system_size is None:
+            self.system_size = self.system_sizes[size_idx]
+        else:
+            self.system_size = system_size
+        if param is None:
+            self.param = self.param_range[0] + torch.rand(self.param_dim) * (
+                self.param_range[1] - self.param_range[0]
+            )
+        else:
+            self.param = param
+        # self.prefix = self.init_seq()
+
     def wrap_spins_batch(self, params, spins, system_size):
         """
 
@@ -236,9 +275,9 @@ class TransformerModel(nn.Module):
         """
         return 2 * torch.pi * (1 + x / (1 + x.abs()))
 
-    def forward(
+    def forward_batched(
         self,
-        params: Float[torch.Tensor, "batch n_params"],
+        params: Float[torch.Tensor, "batch n_params"],  # TODO: verify dims
         spins: Float[torch.Tensor, "n batch"],
         system_size: Float[torch.Tensor, "n_dim"],
         compute_phase=True,
@@ -265,3 +304,107 @@ class TransformerModel(nn.Module):
             phase = self.softsign(self.phase_head(psi_output))
 
         return amp, phase
+
+    def forward(self, spins, compute_phase=True):
+        # src: (seq, batch, input_dim)
+        # use_symmetry: has no effect in this function
+        # only included to be consistent with the symmetric version
+
+        # One-hot encode the spins
+        # TODO: is this exactly what wrap_spins_batch expects?
+
+        if self.system_size is None or self.param is None:
+            raise ValueError(
+                "System size and parameter must be set before forward pass. Use set_param, a method meant for compatibility with the original model structure."
+            )
+
+        params = self.param.unsqueeze(0).expand(spins.shape[1], -1)
+
+        src = self.wrap_spins_batch(params, spins, self.system_size)
+
+        # src = self.wrap_spins(spins)
+        if self.src_mask is None or self.src_mask.size(0) != len(src):
+            mask = self._generate_square_subsequent_mask(len(src)).to(src.device)
+            self.src_mask = mask
+
+        system_size = src[
+            : self.n_dim,
+            0,
+            self.possible_spin_vals : self.possible_spin_vals + self.n_dim,
+        ].diag()  # (n_dim, )
+        system_size = system_size.exp().round().to(torch.int64)  # (n_dim, )
+
+        result = []
+        if self.minibatch is None:
+            # Map the one-hot encoded spins to an initial embedding with a
+            # trainable linear transformation. TODO: Why do we not divide?
+            src = self.encoder(src) * math.sqrt(
+                self.embedding_size
+            )  # (seq, batch, embedding)
+            # src = src + self.pos_embedding[:len(src)]  # (seq, batch, embedding)
+
+            # Perform the parameter and spin positional embedding, adding position
+            # information to this particular sequence of parameters, then to spins
+            src = self.pos_encoder(src, system_size)  # (seq, batch, embedding)
+
+            # Pass the embedded spins through the transformer encoder
+            output = self.transformer_encoder(
+                src, self.src_mask
+            )  # (seq, batch, embedding)
+
+            # Retrieve only the parts of the output sequence that
+            # correspond to the wave function conditional probabilities
+            psi_output = output[
+                self.seq_prefix_len - 1 :
+            ]  # only use the physical degrees of freedom
+
+            # Apply a trainable linear transformation (self.amp_head) to produce
+            # logits for the conditional probabilities of the wave function. Apply
+            # softmax after that to get the actual probabilities.
+            amp = F.log_softmax(
+                self.amp_head(psi_output), dim=-1
+            )  # (n, batch, phys_dim)
+
+            result.append(amp)
+
+            # Do something similar for phases, but compute the softsign function
+            # instead of softmax
+            if compute_phase:
+                phase = self.softsign(
+                    self.phase_head(psi_output)
+                )  # (seq, batch, phys_dim)
+                result.append(phase)
+        else:
+            batch = src.shape[1]
+            minibatch = self.minibatch
+            repeat = int(np.ceil(batch / minibatch))
+            amp = []
+            phase = []
+            for i in range(repeat):
+                src_i = src[:, i * minibatch : (i + 1) * minibatch]
+                src_i = self.encoder(src_i) * math.sqrt(
+                    self.embedding_size
+                )  # (seq, batch, embedding)
+                # src_i = src_i + self.pos_embedding[:len(src_i)]  # (seq, batch, embedding)
+                src_i = self.pos_encoder(src_i, system_size)  # (seq, batch, embedding)
+                output_i = self.transformer_encoder(
+                    src_i, self.src_mask
+                )  # (seq, batch, embedding)
+                psi_output = output_i[
+                    self.seq_prefix_len - 1 :
+                ]  # only use the physical degrees of freedom
+                amp_i = F.log_softmax(
+                    self.amp_head(psi_output), dim=-1
+                )  # (seq, batch, phys_dim)
+                amp.append(amp_i)
+                if compute_phase:
+                    phase_i = self.softsign(
+                        self.phase_head(psi_output)
+                    )  # (seq, batch, phys_dim)
+                    phase.append(phase_i)
+            amp = torch.cat(amp, dim=1)
+            result.append(amp)
+            if compute_phase:
+                phase = torch.cat(phase, dim=1)
+                result.append(phase)
+        return result
