@@ -220,8 +220,7 @@ class Ising(Hamiltonian):
         )
         dataset = ProbabilityAmplitudeDataset(basis, parameters, ground_states)
 
-        # self.sampler = BatchSampler(RandomSampler(dataset, replacement=False, generator=torch.Generator(device="cuda")), batch_size, drop_last=False)
-        # self.training_dataset = dataset
+        device = torch.get_default_device()
 
         self.training_dataset = DataLoader(
             dataset,
@@ -230,7 +229,7 @@ class Ising(Hamiltonian):
             prefetch_factor=2,
             num_workers=1,
             shuffle=True,
-            generator=torch.Generator(device="cuda"),
+            generator=torch.Generator(device=device),
             pin_memory=True,
         )
 
@@ -317,7 +316,9 @@ found h_min={0}, h_max={1}, h_step={2}, expected h_min={3}, h_max={4}. Setting p
 
         self.h_step = h_step
 
-        generator = torch.Generator(device="cuda")
+        device = torch.get_default_device()
+
+        generator = torch.Generator(device=device)
         dataset = IsingDataset(self.dataset, self.basis)
         random_sampler = RandomSampler(dataset, replacement=False, generator=generator)
         batched_sampler = BatchSampler(random_sampler, batch_size, drop_last=False)
