@@ -83,42 +83,11 @@ class Hamiltonian:
         params = model.param  # (n_param, )
         self.update_param(params)
 
-        # Iterate over terms in the Hamiltonian, treating each term as
-        # its own observable. Each Hi is of the form
-        # (pauli_str, coef, spin_idx), where pauli_str is a list of strings over the alphabet
-        # {'X', 'Y', 'Z'}, coef is a list of scalars, and spin_idx is a tensor of indices that the
-        # operators act on. TODO: Hypothesis: the first dimension of spin_idx should match the length of the
-        # pauli_strs, and the second dimension can be arbitrary (n_op, n_index_groups).
-
-        # Note that any single Hi shares the spin groupings it acts on.
         for Hi in self.H:
-            # list of tensors, (n_op, batch)
-
-            # Any Hi contains a list of Pauli strings, a list of coefficients, and a tensor of indices--
-            # and thus it separates an observable into parts. compute_observable will return a list
-            # of values, one for each part of the observable.
-
-            # TODO: what's an example of an observable that would habe multiple parts, with multiple
-            # pauli strings and coefficients?
-
-            # TODO: it seems that the parts of a single observable are always in a term-in-a-linear-combination
-            # relationship with the other parts, with the coefficients determining the linear combination weights.
-
-            # O := [coef_1 * value_1, coef_2 * value_2, ...]
 
             O = compute_observable(
                 model, samples, sample_weight, Hi, batch_mean=False, symmetry=symmetry
             )
-
-            # Sum over coef_k * value_k members in O (via .sum), then add this Hamiltonian
-            # term's contribution to the total energy.
-
-            # NOTE: compute_observable finds expected values of observables using the samples
-            # provided to it, so the sum of the values in O is <H>--which is the variational energy
-            # estimation ground state upper bound.
-            #
-            # In particular, <H> is an expected value over the probabilitiy distribution
-            # |\psi(\vec s, \vec J)|^2,
 
             for Oj in O:
                 E += Oj.sum(dim=0)
@@ -139,92 +108,8 @@ class Hamiltonian:
         self.psi_ground = psi_ground
         return E_ground
 
-    # def memoize(
-    #     self, param_range: torch.Tensor, param_step: torch.Tensor, directory: str
-    # ):
-    #     """
-    #     Precalculate ground state energies and wavefunctions for a range of parameters at
-    #     intervals specified by param_step. Save the result to a file with an automatically-generated
-    #     name (based on the Hamiltonian type, system size, parameter ranges, and parameter step sizes).
-    #     Will load files that match the specified parameters if they exist or will create them.
-
-    #     Parameters:
-    #     param_range : torch.Tensor - (n_param, 2)
-    #         The range of parameters to memoize (vertically-organized, with the first column
-    #         being the lower bounds and the second column being the upper bounds)
-    #     param_step : torch.Tensor - (n_param, )
-    #         The step sizes of the parameters to memoize, aligned with param_range's vertical dimension
-    #     directory : str
-    #         The path to the directory where the memoized datasets will be stored
-
-    #     Returns: None
-    #     """
-    #     raise NotImplementedError("Memoization of datasets is not implemented yet.")
-
-    # def retrieve_ground_states(
-    #     self,
-    #     param_range: torch.Tensor,
-    #     param_step: torch.Tensor,
-    #     directory: str,
-    #     as_dataframe: bool = True,
-    # ):
-    #     """
-    #     Load memoized ground state energies and wavefunctions from a file using its automatically
-    #     generated name as an identifier. See memoize.
-
-    #     Parameters:
-    #     param_range : torch.Tensor - (n_param, 2)
-    #         The range of parameters used in the memoization (vertically-organized, with the first column
-    #         being the lower bounds and the second column being the upper bounds)
-    #     param_step : torch.Tensor - (n_param, )
-    #         The step sizes of the parameters used in the memoization, aligned with param_range's vertical
-    #         dimension
-    #     directory : str
-    #         The path to the directory where the memoized datasets are stored
-    #     as_dataframe : bool
-    #         Whether to return the loaded data as a pandas DataFrame (True) or as a PyTorch dataset (False)
-
-    #     Returns:
-    #     dataset : pandas.DataFrame or torch.utils.data.Dataset
-    #         The memoized dataset, either as a DataFrame or as a PyTorch dataset
-    #     """
-
-    #     raise NotImplementedError(
-    #         "Retrieval of memoized datasets is not implemented yet."
-    #     )
-
-    def calc_ground(self, param=None):
-        """
-        Calculate the ground state energy and wavefunction.
-
-        Parameters:
-        param : torch.Tensor - (n_param, )
-            The parameters of the Hamiltonian in the form expected by full_H
-
-        Returns:
-        E_ground : float
-            The ground state energy
-        psi_ground : np.ndarray
-            The ground state wave function in the Hilbert space basis
-        """
-
-        # TODO: load from file if available, otherwise calculate
-        # and store. Look into PyTorch's Dataset and Sampler classes.
-
-        if param is None:
-            full_Hamiltonian = self.full_H()
-        else:
-            full_Hamiltonian = self.full_H(param)
-        [E_ground, psi_ground] = eigsh(full_Hamiltonian, k=1, which="SA")
-        E_ground = E_ground[0]
-        psi_ground = psi_ground[:, 0]
-        return E_ground, torch.tensor(psi_ground)
-
-    def retrieve_ground(self, param, system_size):
-        raise NotImplementedError("Override retrieve_ground in the child class")
-
     def DMRG(self):
-        raise NotImplementedError
+        raise NotImplementedError("Override the DMRG function in a child class")
 
     def add_spatial_symmetry(self):
         if self.n_dim == 1:
