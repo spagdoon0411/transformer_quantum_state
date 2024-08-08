@@ -136,10 +136,10 @@ def prob_phase_loss(
         writer.add_scalar("Loss/Total", total_loss, writer_iter)
 
     if (ham_loss_dict is not None) and (ham_loss_dict_key is not None):
-        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss"] = prob_loss
-        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss_weighted"] = prob_loss_weighted
-        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss"] = phase_loss
-        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss_weighted"] = phase_loss_weighted
-        ham_loss_dict[f"{ham_loss_dict_key}_total_loss"] = total_loss
+        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss"] = prob_loss.item()
+        ham_loss_dict[f"{ham_loss_dict_key}_prob_loss_weighted"] = prob_loss_weighted.item()
+        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss"] = phase_loss.item()
+        ham_loss_dict[f"{ham_loss_dict_key}_phase_loss_weighted"] = phase_loss_weighted.item()
+        ham_loss_dict[f"{ham_loss_dict_key}_total_loss"] = total_loss.item()
 
     return prob_weight * prob_loss + arg_weight * phase_loss
