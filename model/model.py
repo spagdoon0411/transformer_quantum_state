@@ -320,8 +320,6 @@ class TransformerModel(nn.Module):
         # Completes encoding for these spins entirely
         src = self.wrap_spins_batch(params, spins, phys_dim, system_size)
 
-        # TODO: implement mask
-
         src = self.encoder(src) * math.sqrt(self.embedding_size)
 
         if self.src_mask is None or self.src_mask.size(0) != len(src):
@@ -353,7 +351,6 @@ class TransformerModel(nn.Module):
             mask = self._generate_square_subsequent_mask(len(src)).to(src.device)
             self.src_mask = mask
 
-        # TODO Why would you obtain system sizes like this??
         system_size = src[
             : self.n_dim, 0, self.phys_dim : self.phys_dim + self.n_dim
         ].diag()  # (n_dim, )
@@ -386,7 +383,6 @@ class TransformerModel(nn.Module):
             # Apply a trainable linear transformation (self.amp_head) to produce
             # logits for the conditional probabilities of the wave function. Apply
             # softmax after that to get the actual probabilities.
-            # NOTE: slight detail: the logs of the amplitude are returned
             amp = F.log_softmax(
                 self.amp_head(psi_output), dim=-1
             )  # (n, batch, phys_dim)
