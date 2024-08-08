@@ -58,8 +58,6 @@ model = TransformerModel(
     minibatch=minibatch,
 )
 
-model.cuda()
-
 results_dir = "results"
 paper_checkpoint_name = "ckpt_100000_Ising_32_8_8_0.ckpt"
 paper_checkpoint_path = os.path.join(results_dir, paper_checkpoint_name)
