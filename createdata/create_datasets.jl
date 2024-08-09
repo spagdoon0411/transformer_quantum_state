@@ -1,3 +1,10 @@
+import Pkg
+Pkg.add("ArnoldiMethod")
+Pkg.add("Arrow")
+Pkg.add("JSON")
+Pkg.add("DataFrames")
+Pkg.add("Dates")
+
 using SparseArrays, ArnoldiMethod, Arrow, JSON, DataFrames, Dates
 
 ⊗(x, y) = kron(x, y)
@@ -75,13 +82,15 @@ N_step = 1
 Nrange = N_min:N_step:N_max
 # hrange = h_min:h_step:h_max
 
-top_dataset_dir = "/home/spandan/Projects/transformer_quantum_state/TFIM_ground_states"
+top_dataset_dir = "TFIM_ground_states"
+working_dir = pwd()
+label_dataset_dir = joinpath(working_dir, top_dataset_dir)
 
 timestamp = replace(string(Dates.now()), ":" => "-")
 # this_dataset_dir = "$timestamp"
-this_dataset_dir = "h_windows"
+this_dataset_dir = ARGS[1]
 
-table_dir = joinpath(top_dataset_dir, this_dataset_dir)
+table_dir = joinpath(label_dataset_dir, this_dataset_dir)
 mkpath(table_dir)
 
 file_names = fill("", length(Nrange))
@@ -96,23 +105,23 @@ for N in Nrange # TODO: allocate threads more explicitly
 
     println("Switching to N = $N")
     @time H1, H2 = TransverseFieldIsing_sparse_threaded_base(N=N)
-    for h in 0.5:0.01:0.7
+    for h in 0.6:0.1:0.6
         println("N = $N, h = $h")
         @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
         push!(ground_state_df, (N, h, energy, state))
     end
 
-    for h in 0.9:0.01:1.1
-        println("N = $N, h = $h")
-        @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
-        push!(ground_state_df, (N, h, energy, state))
-    end
+    # for h in 0.9:0.01:1.1
+    #     println("N = $N, h = $h")
+    #     @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
+    #     push!(ground_state_df, (N, h, energy, state))
+    # end
 
-    for h in 1.3:0.01:1.5
-        println("N = $N, h = $h")
-        @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
-        push!(ground_state_df, (N, h, energy, state))
-    end
+    # for h in 1.3:0.01:1.5
+    #     println("N = $N, h = $h")
+    #     @time energy, state = ground_state(specialize_H_threaded(H1, H2, h))
+    #     push!(ground_state_df, (N, h, energy, state))
+    # end
 
     Arrow.write(table_file, ground_state_df, file=true)
     close(table_file)
