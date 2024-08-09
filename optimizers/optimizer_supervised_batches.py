@@ -481,7 +481,7 @@ class Optimizer:
         if log_tensorboard:
             writer = SummaryWriter(self.tensorboard_dir)
             print(
-                f"Use tensorboard --logdir {self.tensorboard_dir} for monitoring. Pass --bind-all if training remotely."
+                f"Use !tensorboard --logdir {self.tensorboard_dir} for monitoring.\nPass --bind-all if training remotely."
             )
         else:
             writer = None
